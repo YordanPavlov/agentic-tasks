@@ -1,0 +1,7132 @@
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    arbERC20: true
+  name: arb-erc20-active-addresses-intraday-deltas
+spec:
+  args:
+    balancesFunction: arb_erc20_balances.ARBERC20BalancesSigned
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      balancesMetrics: true
+      arbERC20: true
+  dag: intraday-metrics-arb-erc20
+  metricSelector:
+    matchLabels:
+      activeAddressesDeltaMetric: true
+  name: arb-erc20-active-addresses-intraday-deltas
+  script: active_addresses_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    arbERC20: true
+  name: arb-erc20-age-distribution-intraday-deltas
+spec:
+  args:
+    stacksFunction: arb_erc20_stacks.ARBERC20Stacks
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      arbERC20: true
+  dag: intraday-metrics-arb-erc20
+  metricSelector:
+    matchLabels:
+      ageDistributionIntradayMetric: true
+  name: arb-erc20-age-distribution-intraday-deltas
+  script: age_distribution_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    arbERC20: true
+    intraday: true
+  name: arb-erc20-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      arbERC20: true
+  dag: intraday-metrics-arb-erc20
+  metricSelector:
+    matchLabels:
+      compositeMetric: true
+      intraday: true
+  name: arb-erc20-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    arbERC20: true
+  name: arb-erc20-cumulative-sums-intraday
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      arbERC20: true
+  dag: intraday-metrics-arb-erc20
+  metricSelector:
+    matchLabels:
+      sumMetric: true
+      intraday: true
+  name: arb-erc20-cumulative-sums-intraday
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    arbERC20: true
+  name: arb-erc20-intraday-prices
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      arbERC20: true
+  dag: intraday-metrics-arb-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      intradayPriceMetric: true
+  name: arb-erc20-intraday-prices
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    arbERC20: true
+    intraday: true
+  name: arb-erc20-network-profit-loss-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.ARBERC20DistributionWithAcquisitionPrice
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      arbERC20: true
+  dag: intraday-metrics-arb-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      networkProfitLoss: true
+  name: arb-erc20-network-profit-loss-intraday
+  script: network_profit_loss_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    arbERC20: true
+  name: arb-erc20-price-volatility-intraday
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      arbERC20: true
+  dag: intraday-metrics-arb-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      volatilityMetric: true
+  name: arb-erc20-price-volatility-intraday
+  script: volatility_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    arbERC20: true
+  name: arb-erc20-rsi-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      arbERC20: true
+  dag: intraday-metrics-arb-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rsiMetric: true
+  name: arb-erc20-rsi-intraday
+  script: rsi_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    arbERC20: true
+  name: arb-erc20-stack-age-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.ARBERC20Distribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      arbERC20: true
+  dag: intraday-metrics-arb-erc20
+  metricSelector:
+    matchLabels:
+      stackAgeConsumedIntradayMetric: true
+  name: arb-erc20-stack-age-consumed-intraday
+  script: stack_age_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    arbERC20: true
+  name: arb-erc20-stack-price-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.ARBERC20DistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      arbERC20: true
+  dag: intraday-metrics-arb-erc20
+  metricSelector:
+    matchLabels:
+      stackPriceConsumedIntradayMetric: true
+  name: arb-erc20-stack-price-consumed-intraday
+  script: stack_price_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    arbERC20: true
+  name: arb-erc20-transaction-volume-intraday
+spec:
+  args:
+    transfersFunction: arb_erc20_transfers.ARBERC20TransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      arbERC20: true
+  dag: intraday-metrics-arb-erc20
+  metricSelector:
+    matchLabels:
+      transactionVolumeIntradayMetric: true
+  name: arb-erc20-transaction-volume-intraday
+  script: transaction_volume_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    arbERC20: true
+    intraday: true
+  name: arb-erc20-intraday-whale-transaction-volume
+spec:
+  args:
+    transfersFunction: arb_erc20_transfers.ARBERC20TransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      arbERC20: true
+  dag: intraday-metrics-arb-erc20
+  metricSelector:
+    matchLabels:
+      whaleTransactionVolume: true
+      intraday: true
+  name: arb-erc20-intraday-whale-transaction-volume
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    arbERC20: true
+    intraday: true
+  name: arb-erc20-intraday-whale-transactions
+spec:
+  args:
+    transfersFunction: arb_erc20_transfers.ARBERC20TransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      arbERC20: true
+  dag: intraday-metrics-arb-erc20
+  metricSelector:
+    matchLabels:
+      whaleIntradayTransactions: true
+  name: arb-erc20-intraday-whale-transactions
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    arbERC20: true
+  name: arb-erc20-transaction-size-intraday
+spec:
+  args:
+    transfersFunction: arb_erc20_transfers.ARBERC20TransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      arbERC20: true
+  dag: intraday-metrics-arb-erc20
+  metricSelector:
+    matchLabels:
+      transferSize: true
+  name: arb-erc20-transaction-size-intraday
+  script: transaction_size_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    avaxERC20: true
+  name: avax-erc20-active-addresses-intraday-deltas
+spec:
+  args:
+    balancesFunction: avax_erc20_balances.AERC20BalancesSigned
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      balancesMetrics: true
+      avaxERC20: true
+  dag: intraday-metrics-avax-erc20
+  metricSelector:
+    matchLabels:
+      activeAddressesDeltaMetric: true
+  name: avax-erc20-active-addresses-intraday-deltas
+  script: active_addresses_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    avaxERC20: true
+  name: avax-erc20-age-distribution-intraday-deltas
+spec:
+  args:
+    stacksFunction: avax_erc20_stacks.AERC20Stacks
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      avaxERC20: true
+  dag: intraday-metrics-avax-erc20
+  metricSelector:
+    matchLabels:
+      ageDistributionIntradayMetric: true
+  name: avax-erc20-age-distribution-intraday-deltas
+  script: age_distribution_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    avaxERC20: true
+    intraday: true
+  name: avax-erc20-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      avaxERC20: true
+  dag: intraday-metrics-avax-erc20
+  metricSelector:
+    matchLabels:
+      compositeMetric: true
+      intraday: true
+  name: avax-erc20-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    avaxERC20: true
+  name: avax-erc20-cumulative-sums-intraday
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      avaxERC20: true
+  dag: intraday-metrics-avax-erc20
+  metricSelector:
+    matchLabels:
+      sumMetric: true
+      intraday: true
+  name: avax-erc20-cumulative-sums-intraday
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    avaxERC20: true
+  name: avax-erc20-intraday-prices
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      avaxERC20: true
+  dag: intraday-metrics-avax-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      intradayPriceMetric: true
+  name: avax-erc20-intraday-prices
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    avaxERC20: true
+    intraday: true
+  name: avax-erc20-network-profit-loss-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.AERC20DistributionWithAcquisitionPrice
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      avaxERC20: true
+  dag: intraday-metrics-avax-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      networkProfitLoss: true
+  name: avax-erc20-network-profit-loss-intraday
+  script: network_profit_loss_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    avaxERC20: true
+  name: avax-erc20-price-volatility-intraday
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      avaxERC20: true
+  dag: intraday-metrics-avax-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      volatilityMetric: true
+  name: avax-erc20-price-volatility-intraday
+  script: volatility_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    avaxERC20: true
+  name: avax-erc20-rsi-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      avaxERC20: true
+  dag: intraday-metrics-avax-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rsiMetric: true
+  name: avax-erc20-rsi-intraday
+  script: rsi_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    avaxERC20: true
+  name: avax-erc20-stack-age-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.AERC20Distribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      avaxERC20: true
+  dag: intraday-metrics-avax-erc20
+  metricSelector:
+    matchLabels:
+      stackAgeConsumedIntradayMetric: true
+  name: avax-erc20-stack-age-consumed-intraday
+  script: stack_age_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    avaxERC20: true
+  name: avax-erc20-stack-price-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.AERC20DistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      avaxERC20: true
+  dag: intraday-metrics-avax-erc20
+  metricSelector:
+    matchLabels:
+      stackPriceConsumedIntradayMetric: true
+  name: avax-erc20-stack-price-consumed-intraday
+  script: stack_price_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    avaxERC20: true
+  name: avax-erc20-transaction-volume-intraday
+spec:
+  args:
+    transfersFunction: avax_erc20_transfers.AERC20TransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      avaxERC20: true
+  dag: intraday-metrics-avax-erc20
+  metricSelector:
+    matchLabels:
+      transactionVolumeIntradayMetric: true
+  name: avax-erc20-transaction-volume-intraday
+  script: transaction_volume_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    avaxERC20: true
+    intraday: true
+  name: avax-erc20-intraday-whale-transaction-volume
+spec:
+  args:
+    transfersFunction: avax_erc20_transfers.AERC20TransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      avaxERC20: true
+  dag: intraday-metrics-avax-erc20
+  metricSelector:
+    matchLabels:
+      whaleTransactionVolume: true
+      intraday: true
+  name: avax-erc20-intraday-whale-transaction-volume
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    avaxERC20: true
+    intraday: true
+  name: avax-erc20-intraday-whale-transactions
+spec:
+  args:
+    transfersFunction: avax_erc20_transfers.AERC20TransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      avaxERC20: true
+  dag: intraday-metrics-avax-erc20
+  metricSelector:
+    matchLabels:
+      whaleIntradayTransactions: true
+  name: avax-erc20-intraday-whale-transactions
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    avaxERC20: true
+  name: avax-erc20-transaction-size-intraday
+spec:
+  args:
+    transfersFunction: avax_erc20_transfers.AERC20TransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      avaxERC20: true
+  dag: intraday-metrics-avax-erc20
+  metricSelector:
+    matchLabels:
+      transferSize: true
+  name: avax-erc20-transaction-size-intraday
+  script: transaction_size_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bch: true
+  name: bch-active-addresses-intraday-deltas
+spec:
+  args:
+    balancesFunction: bch_balances.BCHBalances
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      bch: true
+  dag: intraday-metrics-bch-immutable
+  metricSelector:
+    matchLabels:
+      activeAddressesDeltaMetric: true
+  name: bch-active-addresses-intraday-deltas
+  script: active_addresses_sequenced_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bch: true
+  name: bch-cumulative-sums-intraday
+spec:
+  args:
+    transfersFunction: empty.EmptySourceFunctionIntradayMetrics
+  assetSelector:
+    matchLabels:
+      bch: true
+  dag: intraday-metrics-bch-immutable
+  metricSelector:
+    matchLabels:
+      sumMetric: true
+      intraday: true
+  name: bch-cumulative-sums-intraday
+  script: cumulative_sum_sequenced_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bch: true
+  name: bch-transaction-volume-intraday
+spec:
+  args:
+    transfersFunction: bch_transfers.BCHTransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      bch: true
+  dag: intraday-metrics-bch-immutable
+  metricSelector:
+    matchLabels:
+      transactionVolumeIntradayMetric: true
+  name: bch-transaction-volume-intraday
+  script: transaction_volume_intraday_sequenced_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bch: true
+  name: bch-age-distribution-intraday-deltas
+spec:
+  args:
+    stacksFunction: bch_stacks.BCHStacks
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      bch: true
+  dag: intraday-metrics-bch-immutable
+  metricSelector:
+    matchLabels:
+      ageDistributionIntradayMetric: true
+  name: bch-age-distribution-intraday-deltas
+  script: age_distribution_intraday_sequenced_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bch: true
+  name: bch-stack-age-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.BCHDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      bch: true
+  dag: intraday-metrics-bch-immutable
+  metricSelector:
+    matchLabels:
+      stackAgeConsumedIntradayMetric: true
+  name: bch-stack-age-consumed-intraday
+  script: stack_age_consumed_intraday_sequenced_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  name: bch-rolling-active-addresses-intraday-change
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rollingActiveAddressesChangeMetric: true
+  name: bch-rolling-active-addresses-intraday-change
+  script: rolling_change_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    bch: true
+    intraday: true
+  name: bch-circulation-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.BCHDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      circulationIntradayDelta: true
+  name: bch-circulation-intraday-deltas
+  script: circulation_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    bch: true
+    intraday: true
+  name: bch-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      compositeMetric: true
+      intraday: true
+  name: bch-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    bch: true
+    intraday: true
+    bitmex: true
+  name: bch-bitmex-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      bitmexCompositeMetric: true
+      intraday: true
+  name: bch-bitmex-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: bch-intraday-bitmex-funding-rates
+spec:
+  args:
+    importingFunction: bitmex_importers.FundingRates
+  assetSelector:
+    matchLabels:
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      intraday: true
+      fundingRates: true
+  name: bch-intraday-bitmex-funding-rates
+  script: intraday_importing_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: bch-intraday-bitmex-perpetual-price
+spec:
+  args:
+    importingFunction: bitmex_importers.ContractPrices
+  assetSelector:
+    matchLabels:
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      intraday: true
+      bitmexPerpetualPrice: true
+  name: bch-intraday-bitmex-perpetual-price
+  script: intraday_importing_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: bch-intraday-bitmex-composite-price-index
+spec:
+  args:
+    importingFunction: bitmex_importers.IndexPrice
+  assetSelector:
+    matchLabels:
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      intraday: true
+      bitmexCompositePriceIndex: true
+  name: bch-intraday-bitmex-composite-price-index
+  script: intraday_importing_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bch: true
+  name: bch-cumulative-sums-intraday-metrics
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      circulationsAndRelizedCapsSumMetric: true
+      intraday: true
+  name: bch-cumulative-sums-intraday-metrics
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bch: true
+  name: bch-intraday-prices
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      intraday: true
+      intradayPriceMetric: true
+  name: bch-intraday-prices
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: bch-address-changes-delta-intraday-hourly
+spec:
+  args:
+    balancesFunction: labeled_balances.BCHBalancedLabels
+    blockchain: bitcoin
+    exportable: false
+  assetSelector:
+    matchLabels:
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      balancedLabelsDeltaMetric: true
+  name: bch-address-changes-delta-intraday-hourly
+  script: labeled_balance_delta_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: bch-balance-changes-delta-intraday-hourly
+spec:
+  args:
+    balancesFunction: labeled_balances.BCHLabeledBalances
+    blockchain: bitcoin
+  assetSelector:
+    matchLabels:
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      labeledBalanceDeltaMetric: true
+  name: bch-balance-changes-delta-intraday-hourly
+  script: labeled_balance_delta_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: bch-combined-labeled-balance-delta-intraday-hourly
+spec:
+  args:
+    timeout: 30
+    subqueriesFunction: labeled_balances_subqueries.BCHLabeledBalancesSubQueries
+  assetSelector:
+    matchLabels:
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      combinedLabeledBalanceDeltaMetric: true
+  name: bch-combined-labeled-balance-delta-intraday-hourly
+  script: composite_metric_intraday_labeled_job_v2
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: bch-labeled-balances-cumulative-sums-intraday-hourly
+spec:
+  args:
+    subqueriesFunction: labeled_balances_subqueries.BCHLabeledBalancesSubQueries
+  assetSelector:
+    matchLabels:
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      labeledBalanceSumMetricV2: true
+  name: bch-labeled-balances-cumulative-sums-intraday-hourly
+  script: labeled_balance_cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    bch: true
+    intraday: true
+  name: bch-network-profit-loss-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.BCHDistributionWithAcquisitionPrice
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      intraday: true
+      networkProfitLoss: true
+  name: bch-network-profit-loss-intraday
+  script: network_profit_loss_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bch: true
+  name: bch-price-volatility-intraday
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      intraday: true
+      volatilityMetric: true
+  name: bch-price-volatility-intraday
+  script: volatility_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    bch: true
+    intraday: true
+  name: bch-realized-cap-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.BCHDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      realizedCapIntradayDelta: true
+  name: bch-realized-cap-intraday-deltas
+  script: realized_cap_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bch: true
+  name: bch-rsi-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rsiMetric: true
+  name: bch-rsi-intraday
+  script: rsi_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bch: true
+  name: bch-stack-price-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.BCHDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      stackPriceConsumedIntradayMetric: true
+  name: bch-stack-price-consumed-intraday
+  script: stack_price_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    bch: true
+  name: bch-intraday-whale-transactions
+spec:
+  args:
+    transfersFunction: bch_transfers.BCHTransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      whaleIntradayTransactions: true
+  name: bch-intraday-whale-transactions
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    bch: true
+  name: bch-intraday-whale-transaction-volume
+spec:
+  args:
+    transfersFunction: bch_transfers.BCHTransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      bch: true
+  dag: intraday-metrics-bch
+  metricSelector:
+    matchLabels:
+      whaleTransactionVolume: true
+      intraday: true
+  name: bch-intraday-whale-transaction-volume
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bep20: true
+  name: bep20-active-addresses-intraday-deltas
+spec:
+  args:
+    balancesFunction: bep20_balances.BEP20BalancesSigned
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      balancesMetrics: true
+      bep20: true
+  dag: intraday-metrics-bep20
+  metricSelector:
+    matchLabels:
+      activeAddressesDeltaMetric: true
+  name: bep20-active-addresses-intraday-deltas
+  script: active_addresses_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bep20: true
+  name: bep20-age-distribution-intraday-deltas
+spec:
+  args:
+    stacksFunction: bep20_balances.BEP20AgeBalances
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      bep20: true
+  dag: intraday-metrics-bep20
+  metricSelector:
+    matchLabels:
+      ageDistributionIntradayMetric: true
+  name: bep20-age-distribution-intraday-deltas
+  script: age_distribution_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    bep20: true
+    intraday: true
+  name: bep20-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      bep20: true
+  dag: intraday-metrics-bep20
+  metricSelector:
+    matchLabels:
+      compositeMetric: true
+      intraday: true
+  name: bep20-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bep20: true
+  name: bep20-cumulative-sums-intraday
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      bep20: true
+  dag: intraday-metrics-bep20
+  metricSelector:
+    matchLabels:
+      sumMetric: true
+      intraday: true
+  name: bep20-cumulative-sums-intraday
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bep20: true
+  name: bep20-intraday-prices
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      bep20: true
+  dag: intraday-metrics-bep20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      intradayPriceMetric: true
+  name: bep20-intraday-prices
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    bep20: true
+    intraday: true
+  name: bep20-network-profit-loss-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.BEP20DistributionWithAcquisitionPrice
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      bep20: true
+  dag: intraday-metrics-bep20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      networkProfitLoss: true
+  name: bep20-network-profit-loss-intraday
+  script: network_profit_loss_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bep20: true
+  name: bep20-price-volatility-intraday
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      bep20: true
+  dag: intraday-metrics-bep20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      volatilityMetric: true
+  name: bep20-price-volatility-intraday
+  script: volatility_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bep20: true
+  name: bep20-rsi-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      bep20: true
+  dag: intraday-metrics-bep20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rsiMetric: true
+  name: bep20-rsi-intraday
+  script: rsi_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bep20: true
+  name: bep20-stack-age-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.BEP20Distribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      bep20: true
+  dag: intraday-metrics-bep20
+  metricSelector:
+    matchLabels:
+      stackAgeConsumedIntradayMetric: true
+  name: bep20-stack-age-consumed-intraday
+  script: stack_age_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bep20: true
+  name: bep20-stack-price-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.BEP20DistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      bep20: true
+  dag: intraday-metrics-bep20
+  metricSelector:
+    matchLabels:
+      stackPriceConsumedIntradayMetric: true
+  name: bep20-stack-price-consumed-intraday
+  script: stack_price_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bep20: true
+  name: bep20-transaction-volume-intraday
+spec:
+  args:
+    transfersFunction: bep20_transfers.BEP20TransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      bep20: true
+  dag: intraday-metrics-bep20
+  metricSelector:
+    matchLabels:
+      transactionVolumeIntradayMetric: true
+  name: bep20-transaction-volume-intraday
+  script: transaction_volume_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    bep20: true
+    intraday: true
+  name: bep20-intraday-whale-transactions
+spec:
+  args:
+    transfersFunction: bep20_transfers.BEP20TransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      bep20: true
+  dag: intraday-metrics-bep20
+  metricSelector:
+    matchLabels:
+      whaleIntradayTransactions: true
+  name: bep20-intraday-whale-transactions
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    bep20: true
+    intraday: true
+  name: bep20-intraday-whale-transaction-volume
+spec:
+  args:
+    transfersFunction: bep20_transfers.BEP20TransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      bep20: true
+  dag: intraday-metrics-bep20
+  metricSelector:
+    matchLabels:
+      whaleTransactionVolume: true
+      intraday: true
+  name: bep20-intraday-whale-transaction-volume
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bep20: true
+  name: bep20-transaction-size-intraday
+spec:
+  args:
+    transfersFunction: bep20_transfers.BEP20TransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      bep20: true
+  dag: intraday-metrics-bep20
+  metricSelector:
+    matchLabels:
+      transferSize: true
+  name: bep20-transaction-size-intraday
+  script: transaction_size_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bnb: true
+  name: bnb-intraday-prices
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      bnb: true
+  dag: intraday-metrics-bnb
+  metricSelector:
+    matchLabels:
+      intraday: true
+      intradayPriceMetric: true
+  name: bnb-intraday-prices
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bnb: true
+  name: bnb-price-volatility-intraday
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      bnb: true
+  dag: intraday-metrics-bnb
+  metricSelector:
+    matchLabels:
+      intraday: true
+      volatilityMetric: true
+  name: bnb-price-volatility-intraday
+  script: volatility_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bnb: true
+  name: bnb-rsi-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      bnb: true
+  dag: intraday-metrics-bnb
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rsiMetric: true
+  name: bnb-rsi-intraday
+  script: rsi_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    btc: true
+    intraday: true
+  name: btc-exchange-labelled-intraday-metrics-hourly
+spec:
+  args:
+    transfersFunction: btc_transfers.BTCTransfersInAndOutExchangeNamesOnly
+    blockchain: bitcoin
+    timeout: 60
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc-hourly
+  metricSelector:
+    matchLabels:
+      intraday: true
+      labelledExchangeFlowMetric: true
+  name: btc-exchange-labelled-intraday-metrics-hourly
+  script: exchange_labelled_flows_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    btc: true
+  name: btc-active-addresses-intraday-deltas
+spec:
+  args:
+    balancesFunction: btc_balances.BTCBalances
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      activeAddressesDeltaMetric: true
+  name: btc-active-addresses-intraday-deltas
+  script: active_addresses_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    btc: true
+  name: btc-age-distribution-intraday-deltas
+spec:
+  args:
+    stacksFunction: btc_stacks.BTCStacks
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      ageDistributionIntradayMetric: true
+  name: btc-age-distribution-intraday-deltas
+  script: age_distribution_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    btc: true
+    intraday: true
+  name: btc-circulation-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.BTCDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      circulationIntradayDelta: true
+  name: btc-circulation-intraday-deltas
+  script: circulation_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    btc: true
+    intraday: true
+  name: btc-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      compositeMetric: true
+      intraday: true
+  name: btc-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    btc: true
+    intraday: true
+    bitmex: true
+  name: btc-bitmex-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      bitmexCompositeMetric: true
+      intraday: true
+  name: btc-bitmex-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: btc-intraday-bitmex-perpetual-open-interest
+spec:
+  args:
+    importingFunction: bitmex_importers.OpenInterest
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      bitmexPerpetualOpenInterest: true
+  name: btc-intraday-bitmex-perpetual-open-interest
+  script: intraday_importing_skip_historical_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: btc-intraday-bitmex-perpetual-open-value
+spec:
+  args:
+    importingFunction: bitmex_importers.OpenValue
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      bitmexPerpetualOpenValue: true
+  name: btc-intraday-bitmex-perpetual-open-value
+  script: intraday_importing_skip_historical_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: btc-intraday-bitmex-composite-price-index
+spec:
+  args:
+    importingFunction: bitmex_importers.IndexPrice
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      bitmexCompositePriceIndex: true
+  name: btc-intraday-bitmex-composite-price-index
+  script: intraday_importing_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: btc-intraday-bitmex-funding-rates
+spec:
+  args:
+    importingFunction: bitmex_importers.FundingRates
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      fundingRates: true
+  name: btc-intraday-bitmex-funding-rates
+  script: intraday_importing_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: btc-intraday-bitmex-perpetual-price
+spec:
+  args:
+    importingFunction: bitmex_importers.ContractPrices
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      bitmexPerpetualPrice: true
+  name: btc-intraday-bitmex-perpetual-price
+  script: intraday_importing_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    btc: true
+  name: btc-cumulative-sums-intraday
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      sumMetric: true
+      intraday: true
+  name: btc-cumulative-sums-intraday
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    btc: true
+  name: btc-cumulative-sums-intraday-metrics
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      circulationsAndRelizedCapsSumMetric: true
+      intraday: true
+  name: btc-cumulative-sums-intraday-metrics
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    btc: true
+  name: btc-intraday-prices
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      intradayPriceMetric: true
+  name: btc-intraday-prices
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: intraday-prices-in-bitcoin
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      priceable: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      priceInBtcMetric: true
+  name: intraday-prices-in-bitcoin
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: btc-balance-changes-delta-intraday-hourly
+spec:
+  args:
+    balancesFunction: labeled_balances.BTCLabeledBalances
+    blockchain: bitcoin
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      labeledBalanceDeltaMetric: true
+  name: btc-balance-changes-delta-intraday-hourly
+  script: labeled_balance_delta_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: btc-address-changes-delta-intraday-hourly
+spec:
+  args:
+    balancesFunction: labeled_balances.BTCBalancedLabels
+    blockchain: bitcoin
+    exportable: false
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      balancedLabelsDeltaMetric: true
+  name: btc-address-changes-delta-intraday-hourly
+  script: labeled_balance_delta_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: btc-labeled-balances-cumulative-sums-intraday-hourly
+spec:
+  args:
+    subqueriesFunction: labeled_balances_subqueries.BTCLabeledBalancesSubQueries
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      labeledBalanceSumMetricV2: true
+  name: btc-labeled-balances-cumulative-sums-intraday-hourly
+  script: labeled_balance_cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: btc-combined-labeled-balance-delta-intraday-hourly
+spec:
+  args:
+    timeout: 30
+    subqueriesFunction: labeled_balances_subqueries.BTCLabeledBalancesSubQueries
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      combinedLabeledBalanceDeltaMetric: true
+  name: btc-combined-labeled-balance-delta-intraday-hourly
+  script: composite_metric_intraday_labeled_job_v2
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    btc: true
+    intraday: true
+  name: btc-network-profit-loss-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.BTCDistributionWithAcquisitionPrice
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      networkProfitLoss: true
+  name: btc-network-profit-loss-intraday
+  script: network_profit_loss_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    btc: true
+  name: btc-price-volatility-intraday
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      volatilityMetric: true
+  name: btc-price-volatility-intraday
+  script: volatility_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    btc: true
+    intraday: true
+  name: btc-realized-cap-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.BTCDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      realizedCapIntradayDelta: true
+  name: btc-realized-cap-intraday-deltas
+  script: realized_cap_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    btc: true
+  name: btc-rsi-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rsiMetric: true
+  name: btc-rsi-intraday
+  script: rsi_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    btc: true
+  name: btc-stack-age-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.BTCDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      stackAgeConsumedIntradayMetric: true
+  name: btc-stack-age-consumed-intraday
+  script: stack_age_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    btc: true
+  name: btc-stack-price-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.BTCDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      stackPriceConsumedIntradayMetric: true
+  name: btc-stack-price-consumed-intraday
+  script: stack_price_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    btc: true
+  name: btc-transaction-volume-intraday
+spec:
+  args:
+    transfersFunction: btc_transfers.BTCTransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      transactionVolumeIntradayMetric: true
+  name: btc-transaction-volume-intraday
+  script: transaction_volume_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    btc: true
+    intraday: true
+  name: btc-intraday-whale-transactions
+spec:
+  args:
+    transfersFunction: btc_transfers.BTCTransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      whaleIntradayTransactions: true
+  name: btc-intraday-whale-transactions
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    btc: true
+    intraday: true
+  name: btc-intraday-whale-transaction-volume
+spec:
+  args:
+    transfersFunction: btc_transfers.BTCTransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      whaleTransactionVolume: true
+      intraday: true
+  name: btc-intraday-whale-transaction-volume
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    btc: true
+  name: btc-exchange-intraday-metrics
+spec:
+  args:
+    transfersFunction: btc_transfers.BTCTransfersInAndOutExchangesOnly
+    timeout: 30
+    blockchain: bitcoin
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      btc: true
+  dag: intraday-metrics-btc
+  metricSelector:
+    matchLabels:
+      exchangeFlowMetric: true
+  name: btc-exchange-intraday-metrics
+  script: exchange_flow_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    cardano: true
+  name: cardano-active-addresses-intraday-deltas
+spec:
+  args:
+    balancesFunction: cardano_balances.CardanoBalances
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      balancesMetrics: true
+      cardano: true
+  dag: intraday-metrics-cardano
+  metricSelector:
+    matchLabels:
+      activeAddressesDeltaMetric: true
+  name: cardano-active-addresses-intraday-deltas
+  script: active_addresses_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    cardano: true
+  name: cardano-age-distribution-intraday-deltas
+spec:
+  args:
+    stacksFunction: cardano_stacks.CardanoStacks
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      cardano: true
+  dag: intraday-metrics-cardano
+  metricSelector:
+    matchLabels:
+      ageDistributionIntradayMetric: true
+  name: cardano-age-distribution-intraday-deltas
+  script: age_distribution_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    cardano: true
+    intraday: true
+  name: cardano-circulation-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.CardanoDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      cardano: true
+  dag: intraday-metrics-cardano
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      circulationIntradayDelta: true
+  name: cardano-circulation-intraday-deltas
+  script: circulation_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    cardano: true
+    intraday: true
+  name: cardano-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      cardano: true
+  dag: intraday-metrics-cardano
+  metricSelector:
+    matchLabels:
+      compositeMetric: true
+      intraday: true
+  name: cardano-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    cardano: true
+  name: cardano-cumulative-sums-intraday-metrics
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      cardano: true
+  dag: intraday-metrics-cardano
+  metricSelector:
+    matchLabels:
+      circulationsAndRelizedCapsSumMetric: true
+      intraday: true
+  name: cardano-cumulative-sums-intraday-metrics
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    cardano: true
+  name: cardano-cumulative-sums-intraday
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      cardano: true
+  dag: intraday-metrics-cardano
+  metricSelector:
+    matchLabels:
+      sumMetric: true
+      intraday: true
+  name: cardano-cumulative-sums-intraday
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    cardano: true
+  name: cardano-intraday-prices
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      cardano: true
+  dag: intraday-metrics-cardano
+  metricSelector:
+    matchLabels:
+      intraday: true
+      intradayPriceMetric: true
+  name: cardano-intraday-prices
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    cardano: true
+    intraday: true
+  name: cardano-network-profit-loss-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.CardanoDistributionWithAcquisitionPrice
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      cardano: true
+  dag: intraday-metrics-cardano
+  metricSelector:
+    matchLabels:
+      intraday: true
+      networkProfitLoss: true
+  name: cardano-network-profit-loss-intraday
+  script: network_profit_loss_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    cardano: true
+  name: cardano-price-volatility-intraday
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      cardano: true
+  dag: intraday-metrics-cardano
+  metricSelector:
+    matchLabels:
+      intraday: true
+      volatilityMetric: true
+  name: cardano-price-volatility-intraday
+  script: volatility_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    cardano: true
+    intraday: true
+  name: cardano-realized-cap-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.CardanoDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      cardano: true
+  dag: intraday-metrics-cardano
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      realizedCapIntradayDelta: true
+  name: cardano-realized-cap-intraday-deltas
+  script: realized_cap_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    cardano: true
+  name: cardano-rsi-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      cardano: true
+  dag: intraday-metrics-cardano
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rsiMetric: true
+  name: cardano-rsi-intraday
+  script: rsi_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    cardano: true
+  name: cardano-stack-age-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.CardanoDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      cardano: true
+  dag: intraday-metrics-cardano
+  metricSelector:
+    matchLabels:
+      stackAgeConsumedIntradayMetric: true
+  name: cardano-stack-age-consumed-intraday
+  script: stack_age_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    cardano: true
+  name: cardano-stack-price-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.CardanoDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      cardano: true
+  dag: intraday-metrics-cardano
+  metricSelector:
+    matchLabels:
+      stackPriceConsumedIntradayMetric: true
+  name: cardano-stack-price-consumed-intraday
+  script: stack_price_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    cardano: true
+  name: cardano-transaction-volume-intraday
+spec:
+  args:
+    transfersFunction: cardano_transfers.CardanoTransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      cardano: true
+  dag: intraday-metrics-cardano
+  metricSelector:
+    matchLabels:
+      transactionVolumeIntradayMetric: true
+  name: cardano-transaction-volume-intraday
+  script: transaction_volume_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    cardano: true
+    intraday: true
+  name: cardano-intraday-whale-transactions
+spec:
+  args:
+    transfersFunction: cardano_transfers.CardanoTransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      cardano: true
+  dag: intraday-metrics-cardano
+  metricSelector:
+    matchLabels:
+      whaleIntradayTransactions: true
+  name: cardano-intraday-whale-transactions
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    cardano: true
+    intraday: true
+  name: cardano-intraday-whale-transaction-volume
+spec:
+  args:
+    transfersFunction: cardano_transfers.CardanoTransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      cardano: true
+  dag: intraday-metrics-cardano
+  metricSelector:
+    matchLabels:
+      whaleTransactionVolume: true
+      intraday: true
+  name: cardano-intraday-whale-transaction-volume
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    doge: true
+  name: doge-active-addresses-intraday-deltas
+spec:
+  args:
+    balancesFunction: doge_balances.DOGEBalances
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      activeAddressesDeltaMetric: true
+  name: doge-active-addresses-intraday-deltas
+  script: active_addresses_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    doge: true
+  name: doge-age-distribution-intraday-deltas
+spec:
+  args:
+    stacksFunction: doge_stacks.DOGEStacks
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      ageDistributionIntradayMetric: true
+  name: doge-age-distribution-intraday-deltas
+  script: age_distribution_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    doge: true
+    intraday: true
+  name: doge-circulation-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.DOGEDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      circulationIntradayDelta: true
+  name: doge-circulation-intraday-deltas
+  script: circulation_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    doge: true
+    intraday: true
+  name: doge-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      compositeMetric: true
+      intraday: true
+  name: doge-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    doge: true
+  name: doge-cumulative-sums-intraday-metrics
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      circulationsAndRelizedCapsSumMetric: true
+      intraday: true
+  name: doge-cumulative-sums-intraday-metrics
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    doge: true
+  name: doge-cumulative-sums-intraday
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      sumMetric: true
+      intraday: true
+  name: doge-cumulative-sums-intraday
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    doge: true
+  name: doge-intraday-prices
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      intraday: true
+      intradayPriceMetric: true
+  name: doge-intraday-prices
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: doge-address-changes-delta-intraday-hourly
+spec:
+  args:
+    balancesFunction: labeled_balances.DOGEBalancedLabels
+    blockchain: dogecoin
+    exportable: false
+  assetSelector:
+    matchLabels:
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      balancedLabelsDeltaMetric: true
+  name: doge-address-changes-delta-intraday-hourly
+  script: labeled_balance_delta_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: doge-balance-changes-delta-intraday-hourly
+spec:
+  args:
+    balancesFunction: labeled_balances.DOGELabeledBalances
+    blockchain: dogecoin
+  assetSelector:
+    matchLabels:
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      labeledBalanceDeltaMetric: true
+  name: doge-balance-changes-delta-intraday-hourly
+  script: labeled_balance_delta_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: doge-combined-labeled-balance-delta-intraday-hourly
+spec:
+  args:
+    timeout: 30
+    subqueriesFunction: labeled_balances_subqueries.DOGELabeledBalancesSubQueries
+  assetSelector:
+    matchLabels:
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      combinedLabeledBalanceDeltaMetric: true
+  name: doge-combined-labeled-balance-delta-intraday-hourly
+  script: composite_metric_intraday_labeled_job_v2
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: doge-labeled-balances-cumulative-sums-intraday-hourly
+spec:
+  args:
+    subqueriesFunction: labeled_balances_subqueries.DOGELabeledBalancesSubQueries
+  assetSelector:
+    matchLabels:
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      labeledBalanceSumMetricV2: true
+  name: doge-labeled-balances-cumulative-sums-intraday-hourly
+  script: labeled_balance_cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    doge: true
+    intraday: true
+  name: doge-network-profit-loss-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.DOGEDistributionWithAcquisitionPrice
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      intraday: true
+      networkProfitLoss: true
+  name: doge-network-profit-loss-intraday
+  script: network_profit_loss_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    doge: true
+  name: doge-price-volatility-intraday
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      intraday: true
+      volatilityMetric: true
+  name: doge-price-volatility-intraday
+  script: volatility_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    doge: true
+    intraday: true
+  name: doge-realized-cap-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.DOGEDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      realizedCapIntradayDelta: true
+  name: doge-realized-cap-intraday-deltas
+  script: realized_cap_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    doge: true
+  name: doge-rsi-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rsiMetric: true
+  name: doge-rsi-intraday
+  script: rsi_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    doge: true
+  name: doge-stack-age-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.DOGEDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      stackAgeConsumedIntradayMetric: true
+  name: doge-stack-age-consumed-intraday
+  script: stack_age_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    doge: true
+  name: doge-stack-price-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.DOGEDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      stackPriceConsumedIntradayMetric: true
+  name: doge-stack-price-consumed-intraday
+  script: stack_price_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    doge: true
+  name: doge-transaction-volume-intraday
+spec:
+  args:
+    transfersFunction: doge_transfers.DOGETransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      transactionVolumeIntradayMetric: true
+  name: doge-transaction-volume-intraday
+  script: transaction_volume_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    doge: true
+    intraday: true
+  name: doge-intraday-whale-transaction-volume
+spec:
+  args:
+    transfersFunction: doge_transfers.DOGETransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      whaleTransactionVolume: true
+      intraday: true
+  name: doge-intraday-whale-transaction-volume
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    doge: true
+    intraday: true
+  name: doge-intraday-whale-transactions
+spec:
+  args:
+    transfersFunction: doge_transfers.DOGETransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      whaleIntradayTransactions: true
+  name: doge-intraday-whale-transactions
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    doge: true
+  name: doge-transaction-size-intraday
+spec:
+  args:
+    transfersFunction: doge_transfers.DOGETransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      doge: true
+  dag: intraday-metrics-doge
+  metricSelector:
+    matchLabels:
+      transferSize: true
+  name: doge-transaction-size-intraday
+  script: transaction_size_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    erc20: true
+  name: erc20-active-addresses-intraday-deltas
+spec:
+  args:
+    balancesFunction: erc20_balances.ERC20BalancesSigned
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      balancesMetrics: true
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      activeAddressesDeltaMetric: true
+  name: erc20-active-addresses-intraday-deltas
+  script: active_addresses_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    erc20: true
+  name: erc20-age-distribution-intraday-deltas
+spec:
+  args:
+    stacksFunction: eth_stacks.ERC20StacksOnly
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      ageDistributionIntradayMetric: true
+  name: erc20-age-distribution-intraday-deltas
+  script: age_distribution_batches_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    top50Erc20: true
+    intraday: true
+  name: erc20-circulation-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.ETHDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      top50Erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      circulationIntradayDelta: true
+  name: erc20-circulation-intraday-deltas
+  script: circulation_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    erc20: true
+    intraday: true
+  name: erc20-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+    historical_task_concurrency: 1
+  assetSelector:
+    matchLabels:
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      compositeMetric: true
+      intraday: true
+  name: erc20-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: erc20-link-intraday-bitmex-funding-rates
+spec:
+  args:
+    importingFunction: bitmex_importers.FundingRates
+  assetSelector:
+    matchLabels:
+      link: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      fundingRates: true
+  name: erc20-link-intraday-bitmex-funding-rates
+  script: intraday_importing_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    erc20: true
+  name: erc20-cumulative-sums-intraday
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      sumMetric: true
+      intraday: true
+  name: erc20-cumulative-sums-intraday
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    top50Erc20: true
+  name: erc20-top50-cumulative-sums-intraday-metrics
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      top50Erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      circulationsAndRelizedCapsSumMetric: true
+      intraday: true
+  name: erc20-top50-cumulative-sums-intraday-metrics
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    erc20: true
+  name: erc20-intraday-prices
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      intradayPriceMetric: true
+  name: erc20-intraday-prices
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: erc20-balance-changes-delta-intraday-hourly
+spec:
+  args:
+    balancesFunction: labeled_balances.ERC20LabeledBalances
+    blockchain: ethereum
+  assetSelector:
+    matchLabels:
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      labeledBalanceDeltaMetric: true
+  name: erc20-balance-changes-delta-intraday-hourly
+  script: labeled_balance_delta_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: erc20-combined-labeled-balance-delta-intraday-hourly
+spec:
+  args:
+    timeout: 30
+    subqueriesFunction: labeled_balances_subqueries.ERC20LabeledBalancesSubQueries
+  assetSelector:
+    matchLabels:
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      combinedLabeledBalanceDeltaMetric: true
+  name: erc20-combined-labeled-balance-delta-intraday-hourly
+  script: composite_metric_intraday_labeled_job_v2
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: erc20-labeled-balances-cumulative-sums-intraday-hourly
+spec:
+  args:
+    subqueriesFunction: labeled_balances_subqueries.ERC20LabeledBalancesSubQueries
+    timeout: 90
+  assetSelector:
+    matchLabels:
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      labeledBalanceSumMetricV2: true
+  name: erc20-labeled-balances-cumulative-sums-intraday-hourly
+  script: labeled_balance_cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: erc20-address-changes-delta-intraday-hourly
+spec:
+  args:
+    balancesFunction: labeled_balances.ERC20BalancedLabels
+    blockchain: ethereum
+    exportable: false
+  assetSelector:
+    matchLabels:
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      balancedLabelsDeltaMetric: true
+  name: erc20-address-changes-delta-intraday-hourly
+  script: labeled_balance_delta_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    erc20: true
+    intraday: true
+  name: erc20-network-profit-loss-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.ETHDistributionWithAcquisitionPrice
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      networkProfitLoss: true
+  name: erc20-network-profit-loss-intraday
+  script: network_profit_loss_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    erc20: true
+  name: erc20-price-volatility-intraday
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      volatilityMetric: true
+  name: erc20-price-volatility-intraday
+  script: volatility_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    top50Erc20: true
+    intraday: true
+  name: erc20-realized-cap-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.ETHDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      top50Erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      realizedCapIntradayDelta: true
+  name: erc20-realized-cap-intraday-deltas
+  script: realized_cap_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    erc20: true
+  name: erc20-rsi-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rsiMetric: true
+  name: erc20-rsi-intraday
+  script: rsi_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    erc20: true
+    intraday: true
+  name: erc20-stack-age-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.ETHDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      stackAgeConsumedIntradayMetric: true
+  name: erc20-stack-age-consumed-intraday
+  script: stack_age_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    erc20: true
+  name: erc20-stack-price-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.ETHDistributionWithAcquisitionPrice
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      stackPriceConsumedIntradayMetric: true
+  name: erc20-stack-price-consumed-intraday
+  script: stack_price_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    erc20: true
+  name: erc20-transaction-volume-intraday
+spec:
+  args:
+    transfersFunction: erc20_transfers.ERC20TransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      transactionVolumeIntradayMetric: true
+  name: erc20-transaction-volume-intraday
+  script: transaction_volume_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    erc20: true
+    intraday: true
+  name: erc20-intraday-whale-transactions
+spec:
+  args:
+    transfersFunction: erc20_transfers.ERC20TransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      whaleIntradayTransactions: true
+  name: erc20-intraday-whale-transactions
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    erc20: true
+    intraday: true
+  name: erc20-intraday-whale-transaction-volume
+spec:
+  args:
+    transfersFunction: erc20_transfers.ERC20TransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      whaleTransactionVolume: true
+      intraday: true
+  name: erc20-intraday-whale-transaction-volume
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    erc20: true
+  name: erc20-transaction-size-intraday
+spec:
+  args:
+    transfersFunction: erc20_transfers.ERC20TransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      transferSize: true
+  name: erc20-transaction-size-intraday
+  script: transaction_size_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    erc20: true
+  name: erc20-exchange-intraday-metrics
+spec:
+  args:
+    transfersFunction: erc20_transfers.ERC20TransfersInAndOutWithoutExchangeToExchange
+    timeout: 30
+    blockchain: ethereum
+    historical_task_concurrency: 1
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      exchangeFlowMetric: true
+  name: erc20-exchange-intraday-metrics
+  script: exchange_flow_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    erc20: true
+    intraday: true
+  name: erc20-intraday-deposits
+spec:
+  args:
+    depositTransfersFunction: erc20_transfers.ERC20DepositTransfersOnlyIn
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      depositsActivityIntradayMetric: true
+      intraday: true
+  name: erc20-intraday-deposits
+  script: deposits_activity_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    erc20: true
+    intraday: true
+  name: erc20-intraday-withdrawals
+spec:
+  args:
+    withdrawalTransfersFunction: erc20_transfers.ERC20WithdrawalTransfersOnlyIn
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      withdrawalsActivityIntradayMetric: true
+      intraday: true
+  name: erc20-intraday-withdrawals
+  script: withdrawals_activity_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    erc20: true
+    intraday: true
+  name: erc20-exchange-labelled-intraday-metrics-hourly
+spec:
+  args:
+    transfersFunction: erc20_transfers.ERC20TransfersInAndOutExchangeNamesOnly
+    blockchain: ethereum
+    timeout: 90
+  assetSelector:
+    matchLabels:
+      top50Erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      labelledExchangeFlowMetric: true
+  name: erc20-exchange-labelled-intraday-metrics-hourly
+  script: exchange_labelled_flows_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    erc20: true
+  name: erc20-intraday-dex-trade-amount
+spec:
+  args:
+    tradesFunction: eth_dex_trades.AllTokenDexTradesWithoutMetadata
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      dexTradeAmountMetric: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      dexTradeAmountMetric: true
+  name: erc20-intraday-dex-trade-amount
+  script: intraday_amount_by_dex_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    erc20: true
+  name: erc20-intraday-ethereum-trade-volume-by-token
+spec:
+  args:
+    tradesFunction: eth_dex_trades.DexTradesAgainstETH
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      ethTradeVolumeByTokenMetric: true
+  name: erc20-intraday-ethereum-trade-volume-by-token
+  script: intraday_dex_volume_by_token
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    erc20: true
+  name: erc20-intraday-stablecoin-trade-volume-by-token
+spec:
+  args:
+    tradesFunction: eth_dex_trades.DexTradesAgainstStablecoins
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      stablecoinTradeVolumeByTokenMetric: true
+  name: erc20-intraday-stablecoin-trade-volume-by-token
+  script: intraday_dex_volume_by_token
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    erc20: true
+  name: erc20-intraday-token-ethereum-price-by-dex
+spec:
+  args:
+    tradesFunction: eth_dex_trades.TokenDexTrades
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      erc20: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      tokenEthPriceByDexMetric: true
+  name: erc20-intraday-token-ethereum-price-by-dex
+  script: intraday_price_by_dex_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    erc20: true
+  name: erc20-intraday-dex-trade-volume
+spec:
+  args:
+    tradesFunction: eth_dex_trades.AllTokenDexTrades
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      dexTradeVolumeMetric: true
+  dag: intraday-metrics-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      dexTradeVolumeMetric: true
+  name: erc20-intraday-dex-trade-volume
+  script: intraday_volume_by_dex_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    eth: true
+  name: eth-active-addresses-intraday-deltas
+spec:
+  args:
+    balancesFunction: eth_balances.ETHBalancesSigned
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      activeAddressesDeltaMetric: true
+  name: eth-active-addresses-intraday-deltas
+  script: active_addresses_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    eth: true
+  name: eth-age-distribution-intraday-deltas
+spec:
+  args:
+    stacksFunction: eth_stacks.ETHStacksOnly
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      ageDistributionIntradayMetric: true
+  name: eth-age-distribution-intraday-deltas
+  script: age_distribution_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    eth: true
+  name: eth-stakers-age-distribution-intraday-deltas
+spec:
+  args:
+    stacksFunction: eth_stacks.ETHStacksStakers
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      stakersAgeDistributionIntradayMetric: true
+  name: eth-stakers-age-distribution-intraday-deltas
+  script: age_distribution_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+  name: eth-circulation-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.ETHDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      circulationIntradayDelta: true
+  name: eth-circulation-intraday-deltas
+  script: circulation_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+  name: eth-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      compositeMetric: true
+      intraday: true
+  name: eth-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+    bitmex: true
+  name: eth-bitmex-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      bitmexCompositeMetric: true
+      intraday: true
+  name: eth-bitmex-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: eth-intraday-bitmex-funding-rates
+spec:
+  args:
+    importingFunction: bitmex_importers.FundingRates
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      intraday: true
+      fundingRates: true
+  name: eth-intraday-bitmex-funding-rates
+  script: intraday_importing_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: eth-intraday-bitmex-perpetual-price
+spec:
+  args:
+    importingFunction: bitmex_importers.ContractPrices
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      intraday: true
+      bitmexPerpetualPrice: true
+  name: eth-intraday-bitmex-perpetual-price
+  script: intraday_importing_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: eth-intraday-bitmex-composite-price-index
+spec:
+  args:
+    importingFunction: bitmex_importers.IndexPrice
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      intraday: true
+      bitmexCompositePriceIndex: true
+  name: eth-intraday-bitmex-composite-price-index
+  script: intraday_importing_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    eth: true
+  name: eth-cumulative-sums-intraday-metrics
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      circulationsAndRelizedCapsSumMetric: true
+      intraday: true
+  name: eth-cumulative-sums-intraday-metrics
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    eth: true
+  name: eth-cumulative-sums-single-asset-intraday
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      singleAssetSumMetric: true
+      intraday: true
+  name: eth-cumulative-sums-single-asset-intraday
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    eth: true
+  name: eth-cumulative-sums-intraday
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      sumMetric: true
+      intraday: true
+  name: eth-cumulative-sums-intraday
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    eth: true
+  name: eth-intraday-prices
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      intraday: true
+      intradayPriceMetric: true
+  name: eth-intraday-prices
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: intraday-prices-in-ethereum
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      priceable: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      intraday: true
+      priceInEthMetric: true
+  name: intraday-prices-in-ethereum
+  script: intraday_prices_in_eth_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: eth-balance-changes-delta-intraday-hourly
+spec:
+  args:
+    balancesFunction: labeled_balances.ETHLabeledBalances
+    blockchain: ethereum
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      labeledBalanceDeltaMetric: true
+  name: eth-balance-changes-delta-intraday-hourly
+  script: labeled_balance_delta_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: eth-address-changes-delta-intraday-hourly
+spec:
+  args:
+    balancesFunction: labeled_balances.ETHBalancedLabels
+    blockchain: ethereum
+    exportable: false
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      balancedLabelsDeltaMetric: true
+  name: eth-address-changes-delta-intraday-hourly
+  script: labeled_balance_delta_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: eth-labeled-balances-cumulative-sums-intraday-hourly
+spec:
+  args:
+    subqueriesFunction: labeled_balances_subqueries.ETHLabeledBalancesSubQueries
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      labeledBalanceSumMetricV2: true
+  name: eth-labeled-balances-cumulative-sums-intraday-hourly
+  script: labeled_balance_cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: eth-combined-labeled-balance-delta-intraday-hourly
+spec:
+  args:
+    timeout: 30
+    subqueriesFunction: labeled_balances_subqueries.ETHLabeledBalancesSubQueries
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      combinedLabeledBalanceDeltaMetric: true
+  name: eth-combined-labeled-balance-delta-intraday-hourly
+  script: composite_metric_intraday_labeled_job_v2
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+  name: eth-network-profit-loss-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.ETHDistributionWithAcquisitionPrice
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      intraday: true
+      networkProfitLoss: true
+  name: eth-network-profit-loss-intraday
+  script: network_profit_loss_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    eth: true
+  name: eth-price-volatility-intraday
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      intraday: true
+      volatilityMetric: true
+  name: eth-price-volatility-intraday
+  script: volatility_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+  name: eth-realized-cap-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.ETHDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      realizedCapIntradayDelta: true
+  name: eth-realized-cap-intraday-deltas
+  script: realized_cap_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    eth: true
+  name: eth-rsi-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rsiMetric: true
+  name: eth-rsi-intraday
+  script: rsi_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+  name: eth-stack-age-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.ETHDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      stackAgeConsumedIntradayMetric: true
+  name: eth-stack-age-consumed-intraday
+  script: stack_age_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+  name: eth-stack-price-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.ETHDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      stackPriceConsumedIntradayMetric: true
+  name: eth-stack-price-consumed-intraday
+  script: stack_price_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    eth: true
+  name: eth-transaction-volume-intraday
+spec:
+  args:
+    transfersFunction: eth_transfers.ETHTransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      transactionVolumeIntradayMetric: true
+  name: eth-transaction-volume-intraday
+  script: transaction_volume_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+  name: eth-intraday-whale-transactions
+spec:
+  args:
+    transfersFunction: eth_transfers.ETHTransfersOnlyInWithoutFees
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      whaleIntradayTransactions: true
+  name: eth-intraday-whale-transactions
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+  name: eth-intraday-whale-transaction-volume
+spec:
+  args:
+    transfersFunction: eth_transfers.ETHTransfersOnlyInWithoutFees
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      whaleTransactionVolume: true
+      intraday: true
+  name: eth-intraday-whale-transaction-volume
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    eth: true
+  name: eth-transaction-size-intraday
+spec:
+  args:
+    transfersFunction: eth_transfers.ETHTransfersOnlyInWithoutFees
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      transferSize: true
+  name: eth-transaction-size-intraday
+  script: transaction_size_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    eth: true
+  name: eth-exchange-intraday-metrics
+spec:
+  args:
+    transfersFunction: eth_transfers.ETHTransfersInAndOutWithoutExchangeToExchange
+    timeout: 30
+    blockchain: ethereum
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      exchangeFlowMetric: true
+  name: eth-exchange-intraday-metrics
+  script: exchange_flow_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+  name: eth-intraday-withdrawals
+spec:
+  args:
+    withdrawalTransfersFunction: eth_transfers.EthereumWithdrawalTransfersOnlyIn
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      withdrawalsActivityIntradayMetric: true
+      intraday: true
+  name: eth-intraday-withdrawals
+  script: withdrawals_activity_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+  name: eth-intraday-deposits
+spec:
+  args:
+    depositTransfersFunction: eth_transfers.EthereumDepositTransfersOnlyIn
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      depositsActivityIntradayMetric: true
+      intraday: true
+  name: eth-intraday-deposits
+  script: deposits_activity_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+  name: eth-exchange-labelled-intraday-metrics
+spec:
+  args:
+    transfersFunction: eth_transfers.ETHTransfersInAndOutExchangeNamesOnly
+    blockchain: ethereum
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      labelledExchangeFlowMetric: true
+  name: eth-exchange-labelled-intraday-metrics
+  script: exchange_labelled_flows_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+  name: eth-beacon-chain-deposits-intraday
+spec:
+  args:
+    transferFunction: eth_transfers.ETHTransfersToOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      intraday: true
+      beaconChainDeposits: true
+  name: eth-beacon-chain-deposits-intraday
+  script: eth_beacon_chain_deposits
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+  name: eth-beacon-chain-withdrawals-intraday
+spec:
+  args:
+    transferFunction: eth_transfers.ETHTransfersBeaconWithdrawalsWithPrices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      intraday: true
+      beaconChainWithdrawals: true
+  name: eth-beacon-chain-withdrawals-intraday
+  script: eth_beacon_chain_withdrawals
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+  name: eth-staker-address-count-intraday
+spec:
+  args:
+    transferFunction: eth_transfers.ETHTransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      intraday: true
+      stakerCountMetric: true
+  name: eth-staker-address-count-intraday
+  script: eth2_staker_count
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+  name: eth-gas-used-intraday
+spec:
+  args:
+    transfersFunction: eth_transfers.ETHTransfersFeesWithPrices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      intraday: true
+      gasMetric: true
+  name: eth-gas-used-intraday
+  script: gas_used_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+  name: eth-total-gas-used-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      intraday: true
+      totalGasUsedMetric: true
+  name: eth-total-gas-used-intraday
+  script: total_gas_used_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+  name: eth-transaction-fees-burnt-intraday
+spec:
+  args:
+    transfersFunction: eth_transfers.ETHTransfersBurntFeesWithPrices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      transactionFeeBurntMetricIntraday: true
+  name: eth-transaction-fees-burnt-intraday
+  script: network_fees_burnt_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+  name: eth-transaction-fee-intraday
+spec:
+  args:
+    transfersFunction: eth_transfers.ETHTransfersFeesWithPrices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      transactionFeeMetricIntraday: true
+  name: eth-transaction-fee-intraday
+  script: network_fees_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+  name: eth-realized-profit-intraday-delta
+spec:
+  args:
+    stacksFunction: eth_stacks.ETHStacksWhales
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      realizedProfit: true
+      intraday: true
+  name: eth-realized-profit-intraday-delta
+  script: address_realized_profit_delta
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    eth: true
+    intraday: true
+  name: eth-realized-profit-intraday
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      eth: true
+  dag: intraday-metrics-eth
+  metricSelector:
+    matchLabels:
+      profitSumMetric: true
+      intraday: true
+  name: eth-realized-profit-intraday
+  script: address_realized_profit
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icp: true
+  name: icp-active-addresses-intraday-deltas
+spec:
+  args:
+    balancesFunction: icp_balances.ICPBalancesSigned
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      balancesMetrics: true
+      icp: true
+  dag: intraday-metrics-icp
+  metricSelector:
+    matchLabels:
+      activeAddressesDeltaMetric: true
+  name: icp-active-addresses-intraday-deltas
+  script: active_addresses_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icp: true
+  name: icp-age-distribution-intraday-deltas
+spec:
+  args:
+    stacksFunction: icp_stacks.ICPStacks
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      icp: true
+  dag: intraday-metrics-icp
+  metricSelector:
+    matchLabels:
+      ageDistributionIntradayMetric: true
+  name: icp-age-distribution-intraday-deltas
+  script: age_distribution_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    icp: true
+    intraday: true
+  name: icp-circulation-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.ICPDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      icp: true
+  dag: intraday-metrics-icp
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      circulationIntradayDelta: true
+  name: icp-circulation-intraday-deltas
+  script: circulation_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    icp: true
+    intraday: true
+  name: icp-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      icp: true
+  dag: intraday-metrics-icp
+  metricSelector:
+    matchLabels:
+      compositeMetric: true
+      intraday: true
+  name: icp-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icp: true
+  name: icp-cumulative-sums-intraday
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      icp: true
+  dag: intraday-metrics-icp
+  metricSelector:
+    matchLabels:
+      sumMetric: true
+      intraday: true
+  name: icp-cumulative-sums-intraday
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icp: true
+  name: icp-cumulative-sums-intraday-metrics
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      icp: true
+  dag: intraday-metrics-icp
+  metricSelector:
+    matchLabels:
+      circulationsAndRelizedCapsSumMetric: true
+      intraday: true
+  name: icp-cumulative-sums-intraday-metrics
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icp: true
+  name: icp-intraday-prices
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      icp: true
+  dag: intraday-metrics-icp
+  metricSelector:
+    matchLabels:
+      intraday: true
+      intradayPriceMetric: true
+  name: icp-intraday-prices
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    icp: true
+    intraday: true
+  name: icp-network-profit-loss-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.ICPDistributionWithAcquisitionPrice
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      icp: true
+  dag: intraday-metrics-icp
+  metricSelector:
+    matchLabels:
+      intraday: true
+      networkProfitLoss: true
+  name: icp-network-profit-loss-intraday
+  script: network_profit_loss_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icp: true
+  name: icp-erc20-price-volatility-intraday
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      icp: true
+  dag: intraday-metrics-icp
+  metricSelector:
+    matchLabels:
+      intraday: true
+      volatilityMetric: true
+  name: icp-erc20-price-volatility-intraday
+  script: volatility_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    icp: true
+    intraday: true
+  name: icp-realized-cap-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.ICPDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      icp: true
+  dag: intraday-metrics-icp
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      realizedCapIntradayDelta: true
+  name: icp-realized-cap-intraday-deltas
+  script: realized_cap_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icp: true
+  name: icp-rsi-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      icp: true
+  dag: intraday-metrics-icp
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rsiMetric: true
+  name: icp-rsi-intraday
+  script: rsi_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icp: true
+  name: icp-stack-age-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.ICPDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      icp: true
+  dag: intraday-metrics-icp
+  metricSelector:
+    matchLabels:
+      stackAgeConsumedIntradayMetric: true
+  name: icp-stack-age-consumed-intraday
+  script: stack_age_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icp: true
+  name: icp-transaction-volume-intraday
+spec:
+  args:
+    transfersFunction: icp_transfers.ICPTransfersIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      icp: true
+  dag: intraday-metrics-icp
+  metricSelector:
+    matchLabels:
+      transactionVolumeIntradayMetric: true
+  name: icp-transaction-volume-intraday
+  script: transaction_volume_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    icp: true
+    intraday: true
+  name: icp-intraday-whale-transactions
+spec:
+  args:
+    transfersFunction: icp_transfers.ICPTransfersIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      icp: true
+  dag: intraday-metrics-icp
+  metricSelector:
+    matchLabels:
+      whaleIntradayTransactions: true
+  name: icp-intraday-whale-transactions
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    icp: true
+    intraday: true
+  name: icp-intraday-whale-transaction-volume
+spec:
+  args:
+    transfersFunction: icp_transfers.ICPTransfersIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      icp: true
+  dag: intraday-metrics-icp
+  metricSelector:
+    matchLabels:
+      whaleTransactionVolume: true
+      intraday: true
+  name: icp-intraday-whale-transaction-volume
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icp: true
+  name: icp-transaction-size-intraday
+spec:
+  args:
+    transfersFunction: icp_transfers.ICPTransfersIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      icp: true
+  dag: intraday-metrics-icp
+  metricSelector:
+    matchLabels:
+      transferSize: true
+  name: icp-transaction-size-intraday
+  script: transaction_size_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icrc: true
+  name: icrc-active-addresses-intraday-deltas
+spec:
+  args:
+    balancesFunction: icrc_balances.ICRCBalancesSigned
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      balancesMetrics: true
+      icrc: true
+  dag: intraday-metrics-icrc
+  metricSelector:
+    matchLabels:
+      activeAddressesDeltaMetric: true
+  name: icrc-active-addresses-intraday-deltas
+  script: active_addresses_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icrc: true
+  name: icrc-age-distribution-intraday-deltas
+spec:
+  args:
+    stacksFunction: icrc_stacks.ICRCStacks
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      icrc: true
+  dag: intraday-metrics-icrc
+  metricSelector:
+    matchLabels:
+      ageDistributionIntradayMetric: true
+  name: icrc-age-distribution-intraday-deltas
+  script: age_distribution_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    icrc: true
+    intraday: true
+  name: icrc-circulation-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.ICRCDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      icrc: true
+  dag: intraday-metrics-icrc
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      circulationIntradayDelta: true
+  name: icrc-circulation-intraday-deltas
+  script: circulation_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    icrc: true
+    intraday: true
+  name: icrc-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      icrc: true
+  dag: intraday-metrics-icrc
+  metricSelector:
+    matchLabels:
+      compositeMetric: true
+      intraday: true
+  name: icrc-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icrc: true
+  name: icrc-cumulative-sums-intraday
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      icrc: true
+  dag: intraday-metrics-icrc
+  metricSelector:
+    matchLabels:
+      sumMetric: true
+      intraday: true
+  name: icrc-cumulative-sums-intraday
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icrc: true
+  name: icrc-cumulative-sums-intraday-metrics
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      icrc: true
+  dag: intraday-metrics-icrc
+  metricSelector:
+    matchLabels:
+      circulationsAndRelizedCapsSumMetric: true
+      intraday: true
+  name: icrc-cumulative-sums-intraday-metrics
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icrc: true
+  name: icrc-intraday-prices
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      icrc: true
+  dag: intraday-metrics-icrc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      intradayPriceMetric: true
+  name: icrc-intraday-prices
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    icrc: true
+    intraday: true
+  name: icrc-network-profit-loss-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.ICRCDistributionWithAcquisitionPrice
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      icrc: true
+  dag: intraday-metrics-icrc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      networkProfitLoss: true
+  name: icrc-network-profit-loss-intraday
+  script: network_profit_loss_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icrc: true
+  name: icrc-erc20-price-volatility-intraday
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      icrc: true
+  dag: intraday-metrics-icrc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      volatilityMetric: true
+  name: icrc-erc20-price-volatility-intraday
+  script: volatility_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    icrc: true
+    intraday: true
+  name: icrc-realized-cap-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.ICRCDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      icrc: true
+  dag: intraday-metrics-icrc
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      realizedCapIntradayDelta: true
+  name: icrc-realized-cap-intraday-deltas
+  script: realized_cap_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icrc: true
+  name: icrc-rsi-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      icrc: true
+  dag: intraday-metrics-icrc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rsiMetric: true
+  name: icrc-rsi-intraday
+  script: rsi_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icrc: true
+  name: icrc-stack-price-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.ICRCDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      icrc: true
+  dag: intraday-metrics-icrc
+  metricSelector:
+    matchLabels:
+      stackPriceConsumedIntradayMetric: true
+  name: icrc-stack-price-consumed-intraday
+  script: stack_price_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icrc: true
+  name: icrc-transaction-volume-intraday
+spec:
+  args:
+    transfersFunction: icrc_transfers.ICRCTransfersIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      icrc: true
+  dag: intraday-metrics-icrc
+  metricSelector:
+    matchLabels:
+      transactionVolumeIntradayMetric: true
+  name: icrc-transaction-volume-intraday
+  script: transaction_volume_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    icrc: true
+    intraday: true
+  name: icrc-intraday-whale-transactions
+spec:
+  args:
+    transfersFunction: icrc_transfers.ICRCTransfersIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      icrc: true
+  dag: intraday-metrics-icrc
+  metricSelector:
+    matchLabels:
+      whaleIntradayTransactions: true
+  name: icrc-intraday-whale-transactions
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    icrc: true
+    intraday: true
+  name: icrc-intraday-whale-transaction-volume
+spec:
+  args:
+    transfersFunction: icrc_transfers.ICRCTransfersIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      icrc: true
+  dag: intraday-metrics-icrc
+  metricSelector:
+    matchLabels:
+      whaleTransactionVolume: true
+      intraday: true
+  name: icrc-intraday-whale-transaction-volume
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    icrc: true
+  name: icrc-transaction-size-intraday
+spec:
+  args:
+    transfersFunction: icrc_transfers.ICRCTransfersIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      icrc: true
+  dag: intraday-metrics-icrc
+  metricSelector:
+    matchLabels:
+      transferSize: true
+  name: icrc-transaction-size-intraday
+  script: transaction_size_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    ltc: true
+  name: ltc-active-addresses-intraday-deltas
+spec:
+  args:
+    balancesFunction: ltc_balances.LTCBalances
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      activeAddressesDeltaMetric: true
+  name: ltc-active-addresses-intraday-deltas
+  script: active_addresses_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  name: ltc-rolling-active-addresses-intraday-change
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rollingActiveAddressesChangeMetric: true
+  name: ltc-rolling-active-addresses-intraday-change
+  script: rolling_change_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    ltc: true
+  name: ltc-age-distribution-intraday-deltas
+spec:
+  args:
+    stacksFunction: ltc_stacks.LTCStacks
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      ageDistributionIntradayMetric: true
+  name: ltc-age-distribution-intraday-deltas
+  script: age_distribution_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    ltc: true
+    intraday: true
+  name: ltc-circulation-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.LTCDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      circulationIntradayDelta: true
+  name: ltc-circulation-intraday-deltas
+  script: circulation_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    ltc: true
+    intraday: true
+  name: ltc-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      compositeMetric: true
+      intraday: true
+  name: ltc-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    ltc: true
+    intraday: true
+    bitmex: true
+  name: ltc-bitmex-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      bitmexCompositeMetric: true
+      intraday: true
+  name: ltc-bitmex-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: ltc-intraday-bitmex-funding-rates
+spec:
+  args:
+    importingFunction: bitmex_importers.FundingRates
+  assetSelector:
+    matchLabels:
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      fundingRates: true
+  name: ltc-intraday-bitmex-funding-rates
+  script: intraday_importing_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: ltc-intraday-bitmex-perpetual-price
+spec:
+  args:
+    importingFunction: bitmex_importers.ContractPrices
+  assetSelector:
+    matchLabels:
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      bitmexPerpetualPrice: true
+  name: ltc-intraday-bitmex-perpetual-price
+  script: intraday_importing_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: ltc-intraday-bitmex-composite-price-index
+spec:
+  args:
+    importingFunction: bitmex_importers.IndexPrice
+  assetSelector:
+    matchLabels:
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      bitmexCompositePriceIndex: true
+  name: ltc-intraday-bitmex-composite-price-index
+  script: intraday_importing_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    ltc: true
+  name: ltc-cumulative-sums-intraday
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      sumMetric: true
+      intraday: true
+  name: ltc-cumulative-sums-intraday
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    ltc: true
+  name: ltc-cumulative-sums-intraday-metrics
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      circulationsAndRelizedCapsSumMetric: true
+      intraday: true
+  name: ltc-cumulative-sums-intraday-metrics
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    ltc: true
+  name: ltc-intraday-prices
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      intradayPriceMetric: true
+  name: ltc-intraday-prices
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: ltc-address-changes-delta-intraday-hourly
+spec:
+  args:
+    balancesFunction: labeled_balances.LTCBalancedLabels
+    blockchain: litecoin
+    exportable: false
+  assetSelector:
+    matchLabels:
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      balancedLabelsDeltaMetric: true
+  name: ltc-address-changes-delta-intraday-hourly
+  script: labeled_balance_delta_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: ltc-balance-changes-delta-intraday-hourly
+spec:
+  args:
+    balancesFunction: labeled_balances.LTCLabeledBalances
+    blockchain: litecoin
+  assetSelector:
+    matchLabels:
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      labeledBalanceDeltaMetric: true
+  name: ltc-balance-changes-delta-intraday-hourly
+  script: labeled_balance_delta_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: ltc-combined-labeled-balance-delta-intraday-hourly
+spec:
+  args:
+    timeout: 30
+    subqueriesFunction: labeled_balances_subqueries.LTCLabeledBalancesSubQueries
+  assetSelector:
+    matchLabels:
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      combinedLabeledBalanceDeltaMetric: true
+  name: ltc-combined-labeled-balance-delta-intraday-hourly
+  script: composite_metric_intraday_labeled_job_v2
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+  name: ltc-labeled-balances-cumulative-sums-intraday-hourly
+spec:
+  args:
+    subqueriesFunction: labeled_balances_subqueries.LTCLabeledBalancesSubQueries
+  assetSelector:
+    matchLabels:
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      labeledBalanceSumMetricV2: true
+  name: ltc-labeled-balances-cumulative-sums-intraday-hourly
+  script: labeled_balance_cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    ltc: true
+    intraday: true
+  name: ltc-network-profit-loss-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.LTCDistributionWithAcquisitionPrice
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      networkProfitLoss: true
+  name: ltc-network-profit-loss-intraday
+  script: network_profit_loss_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    ltc: true
+  name: ltc-price-volatility-intraday
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      volatilityMetric: true
+  name: ltc-price-volatility-intraday
+  script: volatility_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    ltc: true
+    intraday: true
+  name: ltc-realized-cap-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.LTCDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      realizedCapIntradayDelta: true
+  name: ltc-realized-cap-intraday-deltas
+  script: realized_cap_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    ltc: true
+  name: ltc-rsi-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rsiMetric: true
+  name: ltc-rsi-intraday
+  script: rsi_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    ltc: true
+  name: ltc-stack-age-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.LTCDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      stackAgeConsumedIntradayMetric: true
+  name: ltc-stack-age-consumed-intraday
+  script: stack_age_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    ltc: true
+  name: ltc-stack-price-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.LTCDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      stackPriceConsumedIntradayMetric: true
+  name: ltc-stack-price-consumed-intraday
+  script: stack_price_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    ltc: true
+  name: ltc-transaction-volume-intraday
+spec:
+  args:
+    transfersFunction: ltc_transfers.LTCTransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      transactionVolumeIntradayMetric: true
+  name: ltc-transaction-volume-intraday
+  script: transaction_volume_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    ltc: true
+  name: ltc-intraday-whale-transactions
+spec:
+  args:
+    transfersFunction: ltc_transfers.LTCTransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      whaleIntradayTransactions: true
+  name: ltc-intraday-whale-transactions
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    ltc: true
+  name: ltc-intraday-whale-transaction-volume
+spec:
+  args:
+    transfersFunction: ltc_transfers.LTCTransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      ltc: true
+  dag: intraday-metrics-ltc
+  metricSelector:
+    matchLabels:
+      whaleTransactionVolume: true
+      intraday: true
+  name: ltc-intraday-whale-transaction-volume
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    matic: true
+  name: matic-active-addresses-intraday-deltas
+spec:
+  args:
+    balancesFunction: matic_balances.MATICBalancesSigned
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      matic: true
+  dag: intraday-metrics-matic
+  metricSelector:
+    matchLabels:
+      activeAddressesDeltaMetric: true
+  name: matic-active-addresses-intraday-deltas
+  script: active_addresses_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    matic: true
+  name: matic-age-distribution-intraday-deltas
+spec:
+  args:
+    stacksFunction: matic_stacks.MATICStacks
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      matic: true
+  dag: intraday-metrics-matic
+  metricSelector:
+    matchLabels:
+      ageDistributionIntradayMetric: true
+  name: matic-age-distribution-intraday-deltas
+  script: age_distribution_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    matic: true
+    intraday: true
+  name: matic-circulation-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.MATICDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      matic: true
+  dag: intraday-metrics-matic
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      circulationIntradayDelta: true
+  name: matic-circulation-intraday-deltas
+  script: circulation_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    matic: true
+    intraday: true
+  name: matic-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      matic: true
+  dag: intraday-metrics-matic
+  metricSelector:
+    matchLabels:
+      compositeMetric: true
+      intraday: true
+  name: matic-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    matic: true
+  name: matic-cumulative-sums-intraday
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      matic: true
+  dag: intraday-metrics-matic
+  metricSelector:
+    matchLabels:
+      sumMetric: true
+      intraday: true
+  name: matic-cumulative-sums-intraday
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    matic: true
+  name: matic-intraday-prices
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      matic: true
+  dag: intraday-metrics-matic
+  metricSelector:
+    matchLabels:
+      intraday: true
+      intradayPriceMetric: true
+  name: matic-intraday-prices
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    matic: true
+    intraday: true
+  name: matic-network-profit-loss-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.MATICDistributionWithAcquisitionPrice
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      matic: true
+  dag: intraday-metrics-matic
+  metricSelector:
+    matchLabels:
+      intraday: true
+      networkProfitLoss: true
+  name: matic-network-profit-loss-intraday
+  script: network_profit_loss_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    matic: true
+  name: matic-price-volatility-intraday
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      matic: true
+  dag: intraday-metrics-matic
+  metricSelector:
+    matchLabels:
+      intraday: true
+      volatilityMetric: true
+  name: matic-price-volatility-intraday
+  script: volatility_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    matic: true
+    intraday: true
+  name: matic-realized-cap-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.MATICDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      matic: true
+  dag: intraday-metrics-matic
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      realizedCapIntradayDelta: true
+  name: matic-realized-cap-intraday-deltas
+  script: realized_cap_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    matic: true
+  name: matic-rsi-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      matic: true
+  dag: intraday-metrics-matic
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rsiMetric: true
+  name: matic-rsi-intraday
+  script: rsi_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    matic: true
+  name: matic-stack-age-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.MATICDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      matic: true
+  dag: intraday-metrics-matic
+  metricSelector:
+    matchLabels:
+      stackAgeConsumedIntradayMetric: true
+  name: matic-stack-age-consumed-intraday
+  script: stack_age_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    matic: true
+  name: matic-stack-price-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.MATICDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      matic: true
+  dag: intraday-metrics-matic
+  metricSelector:
+    matchLabels:
+      stackPriceConsumedIntradayMetric: true
+  name: matic-stack-price-consumed-intraday
+  script: stack_price_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    matic: true
+  name: matic-transaction-volume-intraday
+spec:
+  args:
+    transfersFunction: matic_transfers.MATICTransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      matic: true
+  dag: intraday-metrics-matic
+  metricSelector:
+    matchLabels:
+      transactionVolumeIntradayMetric: true
+  name: matic-transaction-volume-intraday
+  script: transaction_volume_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    matic: true
+    intraday: true
+  name: matic-intraday-whale-transaction-volume
+spec:
+  args:
+    transfersFunction: matic_transfers.MATICTransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      matic: true
+  dag: intraday-metrics-matic
+  metricSelector:
+    matchLabels:
+      whaleTransactionVolume: true
+      intraday: true
+  name: matic-intraday-whale-transaction-volume
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    matic: true
+    intraday: true
+  name: matic-intraday-whale-transactions
+spec:
+  args:
+    transfersFunction: matic_transfers.MATICTransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      matic: true
+  dag: intraday-metrics-matic
+  metricSelector:
+    matchLabels:
+      whaleIntradayTransactions: true
+  name: matic-intraday-whale-transactions
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    matic: true
+  name: matic-transaction-size-intraday
+spec:
+  args:
+    transfersFunction: matic_transfers.MATICTransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      matic: true
+  dag: intraday-metrics-matic
+  metricSelector:
+    matchLabels:
+      transferSize: true
+  name: matic-transaction-size-intraday
+  script: transaction_size_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    optERC20: true
+  name: opt-erc20-active-addresses-intraday-deltas
+spec:
+  args:
+    balancesFunction: opt_erc20_balances.OERC20BalancesSigned
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      balancesMetrics: true
+      optERC20: true
+  dag: intraday-metrics-opt-erc20
+  metricSelector:
+    matchLabels:
+      activeAddressesDeltaMetric: true
+  name: opt-erc20-active-addresses-intraday-deltas
+  script: active_addresses_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    optERC20: true
+  name: opt-erc20-age-distribution-intraday-deltas
+spec:
+  args:
+    stacksFunction: opt_erc20_stacks.OERC20Stacks
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      optERC20: true
+  dag: intraday-metrics-opt-erc20
+  metricSelector:
+    matchLabels:
+      ageDistributionIntradayMetric: true
+  name: opt-erc20-age-distribution-intraday-deltas
+  script: age_distribution_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    optERC20: true
+    intraday: true
+  name: opt-erc20-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      optERC20: true
+  dag: intraday-metrics-opt-erc20
+  metricSelector:
+    matchLabels:
+      compositeMetric: true
+      intraday: true
+  name: opt-erc20-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    optERC20: true
+  name: opt-erc20-cumulative-sums-intraday
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      optERC20: true
+  dag: intraday-metrics-opt-erc20
+  metricSelector:
+    matchLabels:
+      sumMetric: true
+      intraday: true
+  name: opt-erc20-cumulative-sums-intraday
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    optERC20: true
+  name: opt-erc20-intraday-prices
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      optERC20: true
+  dag: intraday-metrics-opt-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      intradayPriceMetric: true
+  name: opt-erc20-intraday-prices
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    optERC20: true
+    intraday: true
+  name: opt-erc20-network-profit-loss-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.OERC20DistributionWithAcquisitionPrice
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      optERC20: true
+  dag: intraday-metrics-opt-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      networkProfitLoss: true
+  name: opt-erc20-network-profit-loss-intraday
+  script: network_profit_loss_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    optERC20: true
+  name: opt-erc20-price-volatility-intraday
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      optERC20: true
+  dag: intraday-metrics-opt-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      volatilityMetric: true
+  name: opt-erc20-price-volatility-intraday
+  script: volatility_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    optERC20: true
+  name: opt-erc20-rsi-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      optERC20: true
+  dag: intraday-metrics-opt-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rsiMetric: true
+  name: opt-erc20-rsi-intraday
+  script: rsi_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    optERC20: true
+  name: opt-erc20-stack-age-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.OERC20Distribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      optERC20: true
+  dag: intraday-metrics-opt-erc20
+  metricSelector:
+    matchLabels:
+      stackAgeConsumedIntradayMetric: true
+  name: opt-erc20-stack-age-consumed-intraday
+  script: stack_age_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    optERC20: true
+  name: opt-erc20-stack-price-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.OERC20DistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      optERC20: true
+  dag: intraday-metrics-opt-erc20
+  metricSelector:
+    matchLabels:
+      stackPriceConsumedIntradayMetric: true
+  name: opt-erc20-stack-price-consumed-intraday
+  script: stack_price_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    optERC20: true
+  name: opt-erc20-transaction-volume-intraday
+spec:
+  args:
+    transfersFunction: opt_erc20_transfers.OERC20TransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      optERC20: true
+  dag: intraday-metrics-opt-erc20
+  metricSelector:
+    matchLabels:
+      transactionVolumeIntradayMetric: true
+  name: opt-erc20-transaction-volume-intraday
+  script: transaction_volume_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    optERC20: true
+    intraday: true
+  name: opt-erc20-intraday-whale-transactions
+spec:
+  args:
+    transfersFunction: opt_erc20_transfers.OERC20TransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      optERC20: true
+  dag: intraday-metrics-opt-erc20
+  metricSelector:
+    matchLabels:
+      whaleIntradayTransactions: true
+  name: opt-erc20-intraday-whale-transactions
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    optERC20: true
+    intraday: true
+  name: opt-erc20-intraday-whale-transaction-volume
+spec:
+  args:
+    transfersFunction: opt_erc20_transfers.OERC20TransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      optERC20: true
+  dag: intraday-metrics-opt-erc20
+  metricSelector:
+    matchLabels:
+      whaleTransactionVolume: true
+      intraday: true
+  name: opt-erc20-intraday-whale-transaction-volume
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    optERC20: true
+  name: opt-erc20-transaction-size-intraday
+spec:
+  args:
+    transfersFunction: opt_erc20_transfers.OERC20TransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      optERC20: true
+  dag: intraday-metrics-opt-erc20
+  metricSelector:
+    matchLabels:
+      transferSize: true
+  name: opt-erc20-transaction-size-intraday
+  script: transaction_size_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    polygonERC20: true
+  name: polygon-erc20-active-addresses-intraday-deltas
+spec:
+  args:
+    balancesFunction: polygon_erc20_balances.PERC20BalancesSigned
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      polygonERC20: true
+  dag: intraday-metrics-polygon-erc20
+  metricSelector:
+    matchLabels:
+      activeAddressesDeltaMetric: true
+  name: polygon-erc20-active-addresses-intraday-deltas
+  script: active_addresses_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    polygonERC20: true
+  name: polygon-erc20-age-distribution-intraday-deltas
+spec:
+  args:
+    stacksFunction: polygon_erc20_balances.PolygonERC20AgeBalances
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      polygonERC20: true
+  dag: intraday-metrics-polygon-erc20
+  metricSelector:
+    matchLabels:
+      ageDistributionIntradayMetric: true
+  name: polygon-erc20-age-distribution-intraday-deltas
+  script: age_distribution_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    polygonERC20: true
+    intraday: true
+  name: polygon-erc20-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      polygonERC20: true
+  dag: intraday-metrics-polygon-erc20
+  metricSelector:
+    matchLabels:
+      compositeMetric: true
+      intraday: true
+  name: polygon-erc20-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    polygonERC20: true
+  name: polygon-erc20-cumulative-sums-intraday
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      polygonERC20: true
+  dag: intraday-metrics-polygon-erc20
+  metricSelector:
+    matchLabels:
+      sumMetric: true
+      intraday: true
+  name: polygon-erc20-cumulative-sums-intraday
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    polygonERC20: true
+  name: polygon-erc20-intraday-prices
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      polygonERC20: true
+  dag: intraday-metrics-polygon-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      intradayPriceMetric: true
+  name: polygon-erc20-intraday-prices
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    polygonERC20: true
+    intraday: true
+  name: polygon-erc20-network-profit-loss-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.POLYGONDistributionWithAcquisitionPrice
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      polygonERC20: true
+  dag: intraday-metrics-polygon-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      networkProfitLoss: true
+  name: polygon-erc20-network-profit-loss-intraday
+  script: network_profit_loss_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    polygonERC20: true
+  name: polygon-erc20-price-volatility-intraday
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      polygonERC20: true
+  dag: intraday-metrics-polygon-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      volatilityMetric: true
+  name: polygon-erc20-price-volatility-intraday
+  script: volatility_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    polygonERC20: true
+  name: polygon-erc20-rsi-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      polygonERC20: true
+  dag: intraday-metrics-polygon-erc20
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rsiMetric: true
+  name: polygon-erc20-rsi-intraday
+  script: rsi_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    polygonERC20: true
+  name: polygon-erc20-stack-age-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.POLYGONDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      polygonERC20: true
+  dag: intraday-metrics-polygon-erc20
+  metricSelector:
+    matchLabels:
+      stackAgeConsumedIntradayMetric: true
+  name: polygon-erc20-stack-age-consumed-intraday
+  script: stack_age_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    polygonERC20: true
+  name: polygon-erc20-stack-price-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.POLYGONDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      polygonERC20: true
+  dag: intraday-metrics-polygon-erc20
+  metricSelector:
+    matchLabels:
+      stackPriceConsumedIntradayMetric: true
+  name: polygon-erc20-stack-price-consumed-intraday
+  script: stack_price_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    polygonERC20: true
+  name: polygon-erc20-transaction-volume-intraday
+spec:
+  args:
+    transfersFunction: polygon_erc20_transfers.PERC20TransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      polygonERC20: true
+  dag: intraday-metrics-polygon-erc20
+  metricSelector:
+    matchLabels:
+      transactionVolumeIntradayMetric: true
+  name: polygon-erc20-transaction-volume-intraday
+  script: transaction_volume_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    polygonERC20: true
+    intraday: true
+  name: polygon-erc20-intraday-whale-transactions
+spec:
+  args:
+    transfersFunction: polygon_erc20_transfers.PERC20TransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      polygonERC20: true
+  dag: intraday-metrics-polygon-erc20
+  metricSelector:
+    matchLabels:
+      whaleIntradayTransactions: true
+  name: polygon-erc20-intraday-whale-transactions
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    polygonERC20: true
+    intraday: true
+  name: polygon-erc20-intraday-whale-transaction-volume
+spec:
+  args:
+    transfersFunction: polygon_erc20_transfers.PERC20TransfersOnlyIn
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      polygonERC20: true
+  dag: intraday-metrics-polygon-erc20
+  metricSelector:
+    matchLabels:
+      whaleTransactionVolume: true
+      intraday: true
+  name: polygon-erc20-intraday-whale-transaction-volume
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    polygonERC20: true
+  name: polygon-erc20-transaction-size-intraday
+spec:
+  args:
+    transfersFunction: polygon_erc20_transfers.PERC20TransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      polygonERC20: true
+  dag: intraday-metrics-polygon-erc20
+  metricSelector:
+    matchLabels:
+      transferSize: true
+  name: polygon-erc20-transaction-size-intraday
+  script: transaction_size_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    xrp: true
+  name: xrp-active-addresses-intraday-deltas
+spec:
+  args:
+    balancesFunction: xrp_balances.XRPBalances
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      activeAddressesDeltaMetric: true
+  name: xrp-active-addresses-intraday-deltas
+  script: active_addresses_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    xrp: true
+  name: xrp-age-distribution-intraday-deltas
+spec:
+  args:
+    stacksFunction: xrp_stacks.XRPStacks
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      ageDistributionIntradayMetric: true
+  name: xrp-age-distribution-intraday-deltas
+  script: age_distribution_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    xrp: true
+    intraday: true
+  name: xrp-circulation-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.XRPDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      circulationIntradayDelta: true
+  name: xrp-circulation-intraday-deltas
+  script: circulation_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    xrp: true
+    intraday: true
+  name: xrp-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      compositeMetric: true
+      intraday: true
+  name: xrp-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    xrp: true
+    intraday: true
+    bitmex: true
+  name: xrp-bitmex-composite-intraday-metrics
+spec:
+  args:
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      bitmexCompositeMetric: true
+      intraday: true
+  name: xrp-bitmex-composite-intraday-metrics
+  script: composite_metric_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: xrp-intraday-bitmex-composite-price-index
+spec:
+  args:
+    importingFunction: bitmex_importers.IndexPrice
+  assetSelector:
+    matchLabels:
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      intraday: true
+      bitmexCompositePriceIndex: true
+  name: xrp-intraday-bitmex-composite-price-index
+  script: intraday_importing_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: xrp-intraday-bitmex-perpetual-price
+spec:
+  args:
+    importingFunction: bitmex_importers.ContractPrices
+  assetSelector:
+    matchLabels:
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      intraday: true
+      bitmexPerpetualPrice: true
+  name: xrp-intraday-bitmex-perpetual-price
+  script: intraday_importing_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    bitmex: true
+  name: xrp-intraday-bitmex-funding-rates
+spec:
+  args:
+    importingFunction: bitmex_importers.FundingRates
+  assetSelector:
+    matchLabels:
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      intraday: true
+      fundingRates: true
+  name: xrp-intraday-bitmex-funding-rates
+  script: intraday_importing_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    xrp: true
+  name: xrp-cumulative-sums-intraday-metrics
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      circulationsAndRelizedCapsSumMetric: true
+      intraday: true
+  name: xrp-cumulative-sums-intraday-metrics
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    xrp: true
+  name: xrp-cumulative-sums-intraday
+spec:
+  args:
+    intraday: true
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      sumMetric: true
+      intraday: true
+  name: xrp-cumulative-sums-intraday
+  script: cumulative_sum_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    xrp: true
+  name: xrp-intraday-prices
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      intraday: true
+      intradayPriceMetric: true
+  name: xrp-intraday-prices
+  script: intraday_prices_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    xrp: true
+    intraday: true
+  name: xrp-network-profit-loss-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.XRPDistributionWithAcquisitionPrice
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      intraday: true
+      networkProfitLoss: true
+  name: xrp-network-profit-loss-intraday
+  script: network_profit_loss_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    xrp: true
+  name: xrp-price-volatility-intraday
+spec:
+  args:
+    pricesFunction: prices.Prices
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      intraday: true
+      volatilityMetric: true
+  name: xrp-price-volatility-intraday
+  script: volatility_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    xrp: true
+    intraday: true
+  name: xrp-realized-cap-intraday-deltas
+spec:
+  args:
+    distributionFunction: distribution_deltas.XRPDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      coinAgeMetric: true
+      realizedCapIntradayDelta: true
+  name: xrp-realized-cap-intraday-deltas
+  script: realized_cap_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    xrp: true
+  name: xrp-rsi-intraday
+spec:
+  assetSelector:
+    matchLabels:
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      intraday: true
+      rsiMetric: true
+  name: xrp-rsi-intraday
+  script: rsi_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    xrp: true
+  name: xrp-stack-age-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.XRPDistribution
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      stackAgeConsumedIntradayMetric: true
+  name: xrp-stack-age-consumed-intraday
+  script: stack_age_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    xrp: true
+  name: xrp-stack-price-consumed-intraday
+spec:
+  args:
+    distributionFunction: distribution_deltas.XRPDistributionWithAcquisitionPrice
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      stacksMetrics: true
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      stackPriceConsumedIntradayMetric: true
+  name: xrp-stack-price-consumed-intraday
+  script: stack_price_consumed_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    xrp: true
+  name: xrp-transaction-volume-intraday
+spec:
+  args:
+    transfersFunction: xrp_transfers.XRPTransfersOnlyIn
+    timeout: 30
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      transactionVolumeIntradayMetric: true
+  name: xrp-transaction-volume-intraday
+  script: transaction_volume_intraday_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    xrp: true
+    intraday: true
+  name: xrp-intraday-whale-transactions
+spec:
+  args:
+    transfersFunction: xrp_transfers.XRPTransfersOnlyInWithoutFees
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      whaleIntradayTransactions: true
+  name: xrp-intraday-whale-transactions
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    xrp: true
+    intraday: true
+  name: xrp-intraday-whale-transaction-volume
+spec:
+  args:
+    transfersFunction: xrp_transfers.XRPTransfersOnlyInWithoutFees
+    intraday: true
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      whaleTransactionVolume: true
+      intraday: true
+  name: xrp-intraday-whale-transaction-volume
+  script: whale_transactions_job
+---
+apiVersion: santiment.net/v2
+kind: DailyMetricsCronJob
+metadata:
+  labels:
+    intraday: true
+    xrp: true
+  name: xrp-exchange-intraday-metrics
+spec:
+  args:
+    transfersFunction: xrp_transfers.XRPTransfersInAndOut
+    timeout: 30
+    blockchain: ripple
+  assetSelector:
+    matchLabels:
+      transfersMetrics: true
+      xrp: true
+  dag: intraday-metrics-xrp
+  metricSelector:
+    matchLabels:
+      exchangeFlowMetric: true
+  name: xrp-exchange-intraday-metrics
+  script: exchange_flow_job
+---
