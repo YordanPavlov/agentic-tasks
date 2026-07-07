@@ -19,4 +19,8 @@ ADRs, reusable procedures → agent skills, prod defects → tracker issues.
 - Root-level symlinks exist for pre-repo absolute paths (older docs/agent
   memories reference `~/santiment/tasks/<old-name>`); don't add new ones for
   new tasks.
-- Update the status column here on every significant milestone.
+- Update the status column here on every significant milestone. A pre-commit
+  hook (`.githooks/`, enabled via `core.hooksPath`) rejects commits that touch
+  a task directory without touching this file.
+- Keep the outcome cell to one or two sentences — current state and where to
+  look. Detail belongs in the task's own journal.

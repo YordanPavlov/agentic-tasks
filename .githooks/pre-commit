@@ -1,0 +1,9 @@
+#!/bin/sh
+# A commit that changes a task directory must also update its status line in
+# INDEX.md, so the index never goes stale.
+staged=$(git diff --cached --name-only)
+echo "$staged" | grep -q '^20[0-9][0-9]-' || exit 0
+echo "$staged" | grep -qx 'INDEX.md' && exit 0
+echo "pre-commit: this commit touches a task directory but not INDEX.md." >&2
+echo "Update the task's status line in INDEX.md and 'git add INDEX.md', then retry." >&2
+exit 1
