@@ -50,7 +50,7 @@ clickhouse-tables (PR #2274, branch `metricsQA`):
 - `table_qa/baselines/eth_metrics_baseline.json` — ETH sample baseline.
 
 docker-airflow (PR #1714, branch `metricsQA`):
-- `dags/metrics_regression_guard.py` — nightly DAG, per chain: **seed-prices → assert-write-surface → recompute → check**, on `clickhouse-tables:master`. Jobs derived from the job graph minus `EXCLUDE_SUBSTR`. ETH fixture: `ethereum/2019-01-01` (asset_id 1681), window genesis → 2018-01-01.
+- `dags/metrics_regression_guard.py` — nightly DAG, per chain: **seed-prices → assert-write-surface → recompute → check**, on `clickhouse-tables:master`. Jobs derived from the job graph minus `EXCLUDE_SUBSTR`. ETH fixture: `ethereum/2019-01-01` (asset_id 1681), recompute window genesis → 2017-01-01 (baseline asserts full year 2016).
 
 ## 5. Expected results (predicted from XRP)
 
@@ -63,7 +63,8 @@ docker-airflow (PR #1714, branch `metricsQA`):
 - Harness + DAG built, validated, and pushed (both PRs open on `metricsQA`).
 - **Write-surface validated:** per-job dry-run of all 55 ETH jobs → 100% writes to the 7 `*_guard` tables. Nothing hits a served table.
 - **Operator:** created the 7 `*_guard` tables (`ON CLUSTER`, after dropping legacy CODECs that the current CH rejects); seeded daily prices for ETH (asset 1681, dt < 2018-01-01, 8 metrics).
-- **ETH recompute RUNNING** — single `main.py` pass, 55 jobs, genesis → 2018-01-01, into `*_guard` (writes validated `_guard`-only). Prod-write mechanism = `clickhouse_driver` writable user (same as the XRP daily run), bypassing the readonly wrapper.
+- **ETH recompute COMPLETE** (rc=0, 55 jobs) — single `main.py` pass into `*_guard`, genesis → 2017-01-01 (reduced from 2018 for nightly infra load; recompute warms from genesis 2015, baseline asserts the clean full year 2016). Produced **119 intraday + 420 daily = 539 on-chain metrics** for asset 1681. Prod-write mechanism = `clickhouse_driver` writable user (same as the XRP daily run), bypassing the readonly wrapper.
+- **Baseline = full 539-metric set** (expanded from the initial 11-metric sample — the sample under-reported fossils), recorded from `*_guard` (HEAD-truth), asserting full year 2016. Self-check vs `*_guard` PASSES. See §10 for the fossil-gap result.
 
 ## 7. Open items / next steps
 
@@ -95,5 +96,22 @@ docker-airflow (PR #1714, branch `metricsQA`):
 - Validated write surface (per-job dry-run, all 55 ETH jobs → 100% `_guard`).
 - Fixed `ON CLUSTER` (3-host cluster, manual create) + moved DDL out of deprecated `db/`; dropped legacy CODECs (Gorilla-on-DateTime rejected by CH 25.3).
 - Operator created the 7 guard tables + seeded ETH daily prices (dt < 2018-01-01).
-- Reduced window to genesis → 2018-01-01 (nightly infra load).
-- **Launched the ETH recompute into `*_guard`** (in progress at end of session).
+- Window: first ran genesis → 2018-01-01 but it was heavy (2.5y incl. 2017's 254M stacks rows; ~3 jobs/13min) — killed and restarted at genesis → 2017-01-01 (recompute warms from genesis 2015, baseline asserts clean full year 2016). ETH volume grows ~6×/yr (6.5M→44M→254M→582M stacks rows/yr), so each added year costs disproportionately.
+- **ETH recompute completed** (rc=0, 55 jobs, 539 metrics into `*_guard`); expanded the baseline from the 11-metric sample to all 539 on-chain metrics; ran the fossil-gap diff (§10).
+
+---
+
+## 10. ETH run + fossil-gap result (2026-07-07)
+
+**Recompute:** `main.py`, 55 on-chain jobs, genesis → 2017-01-01, into `*_guard`. rc=0. Coverage: 119 intraday + 420 daily = **539 metrics** for asset 1681, continuous. Fast for the ~1y window (vs hours for the abandoned 2.5y run) — the concrete nightly-cost data point.
+
+**Baseline:** expanded from the 11-metric sample to the **full 539-metric on-chain set** (all resolve to names in `metric_metadata`; 0 unresolvable). Asserts the **clean full year 2016** — recompute warms from genesis 2015 for cumsum correctness, but 2015 is a partial genesis year whose pre-genesis days get zero-filled by the jobs; asserting 2016 (fully populated both sides) avoids the zero-fill/boundary artifact. Self-check vs `*_guard` PASSES.
+
+**Fossil-gap (HEAD baseline vs SERVED, 2016, 539 metrics):** `sum` gaps tiered —
+- **17 real (rel > 1%), ALL price/profit-weighted:** `transaction_volume_profit`/`_loss`/`_ratio` and `network_profit_loss` (+1d/7d/30d changes) — **severe (rel 0.5 → ∞)**, the NPL family (same methodology + identity/regime story as XRP §12); `stack_mean_age_dollar_days_*` (price×age) rel 0.11–0.44; `stack_realized_cap_usd_delta_7d/30d`, `mean_realized_price_usd_7d`, `mvrv_usd_7d` ~1%.
+- **81 moderate (1e-4 … 1e-2)** — minor drift.
+- **39 float-noise (< 1e-4)** + **~520 metrics reproduce** (all pure-age / transfers / balances, plus short-window price like `mvrv_1d`).
+
+**Conclusion:** ETH's served history is **mostly reproducible** by HEAD code; fossils are **concentrated in the price/profit family** (acquisition-price methodology change + NPL identity/regime) — the same signature as XRP, now confirmed chain-consistent. **Full coverage was essential:** the 11-metric sample hit `realized_cap`/`MVRV`/`MRP` at 1d (which reproduce) and missed the entire NPL family + `_7d`/`_30d`/dollar-days variants (which don't). The guard is validated end-to-end with full 539-metric coverage; baseline committed (`f1189aed`).
+
+**Next:** merge #2274 + #1714 → deploy nightly DAG; optionally drill the `transaction_volume_profit_loss` ∞ divergence to confirm the XRP identity story; roll out to more chains.
