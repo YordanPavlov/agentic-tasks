@@ -1,7 +1,9 @@
 # Verifying the batched-`odt` migration — runbook (XRP first)
 
-> **Master guideline for the whole migration:** [`bounding-flink-stack-cohort-state-with-5min-buckets.md`](bounding-flink-stack-cohort-state-with-5min-buckets.md). Read it first — it carries the *why*, the bucket-size decision (hourly), the precision derivations, and the cross-repo seam. This runbook is the operational *how-to-verify*; that doc is the source of truth for every expectation below.
-> **Background:** [`stacks-from-construction-to-usage.md`](stacks-from-construction-to-usage.md) — what stacks are and how they're consumed.
+> **Master guideline for the whole migration:** the ADR [`etherbi-flink/docs/decisions/configurable-odt-bucketing.md`](../../src/etherbi-flink/docs/decisions/configurable-odt-bucketing.md). Read it first — it carries the *why*, the bucket-size decision (hourly), the precision derivations, and the cross-repo seam. This runbook is the operational *how-to-verify*; that doc is the source of truth for every expectation below.
+> **Background:** the concept doc [`etherbi-flink/docs/concepts/stacks.md`](../../src/etherbi-flink/docs/concepts/stacks.md) — what stacks are and how they're consumed.
+>
+> *(These two in-repo docs are the authoritative reference. They were distilled from the original `santiment-cheatsheets` analysis notes `bounding-flink-stack-cohort-state-with-5min-buckets.md` / `stacks-from-construction-to-usage.md`, which are not checked out in this container and carry only the deeper cross-repo derivation. Links are relative to a local sibling checkout of both repos under `~/santiment` — they do not resolve on GitHub, since `tasks` and `etherbi-flink` are separate repos.)*
 
 **Author:** Yordan + Claude analysis session · **Started:** 2026-06-29
 
@@ -154,11 +156,15 @@ For each affected metric and window: pull the experimental and production series
 
 **Enable the bucket for the next chain when:**
 1. Layer 1 §3.1–§3.5 all pass on the full, settled 6-month window (universe identical, `odt` hourly, 0 key collisions, 0 net mismatch, 0 seam mismatch).
-2. Layer 2 deviations match the §4 table: 1d intraday ~2% and bounded, 7d <1%, ≥30d and all daily within noise, no deviation on unaffected metrics.
+2. Layer 2 deviations match the §4 table: 1d intraday ~2% and bounded, 7d <1%, ≥30d within noise, no deviation on unaffected metrics.
+3. **Coverage — both metric tables recomputed and diffed, not just intraday.** The Layer-2 re-run must populate **and** compare *both* `intraday_metrics_experimental` **and** `daily_metrics_v2_experimental` for the asset, over the pristine window. The daily half is a required empirical gate, **not** an analytical waiver: the §14 "daily is invariant to a sub-day `odt` shift" argument is a hypothesis to *confirm with numbers*, not a reason to skip the daily jobs. Concretely:
+   - **Intraday:** ≥ the stacks-affected metric families in §4 present in `intraday_metrics_experimental`, per-metric_id median/p99 within the §4 bounds.
+   - **Daily:** the daily stacks chain must actually run — first the daily emitter `xrp-age-distribution-1day-deltas` (populates the daily seam row, `metric_id 270`, in `distribution_deltas_5min_experimental`; today only the intraday emitter `162` is present), then its consumers: `circulation`, `realized-cap`, `dormant-circulation`, `stack-age-consumed`, `stack-price-consumed`, `creation-timestamps`(+intervals/dollar), `spent-coins-age-bands`, `transaction-volume-profit-loss`, `supply-in-profit`, daily cumsums + composites (`mvrv`/`mrp` daily). Then diff `daily_metrics_v2_experimental` vs prod per metric_id. **Expected: exact within float noise** (the §4 "0% (exact)" row) — but this must be *shown*, and any daily metric that deviates is a finding, not noise.
+   - **Report a metric count**, per table: "N intraday metric_ids compared (all within §4 bounds); M daily metric_ids compared (all exact within float noise)." A sign-off that leaves either table empty or uncompared is incomplete.
 
-Any failure routes back to the master doc ([`bounding-flink-stack-cohort-state-with-5min-buckets.md`](bounding-flink-stack-cohort-state-with-5min-buckets.md)) — re-check the design assumption it violates before touching code.
+Any failure routes back to the master doc ([`etherbi-flink/docs/decisions/configurable-odt-bucketing.md`](../../src/etherbi-flink/docs/decisions/configurable-odt-bucketing.md)) — re-check the design assumption it violates before touching code.
 
-> **Master/background docs now live in-repo** under `etherbi-flink/docs/`: [`docs/decisions/configurable-odt-bucketing.md`](../src/etherbi-flink/docs/decisions/configurable-odt-bucketing.md) (the ADR, incl. the §3.3 pre-enable gate) and [`docs/concepts/stacks.md`](../src/etherbi-flink/docs/concepts/stacks.md) (the load-bearing invariant). The `santiment-cheatsheets` analysis notes remain the deeper derivation.
+> **Master/background docs now live in-repo** under `etherbi-flink/docs/`: [`docs/decisions/configurable-odt-bucketing.md`](../../src/etherbi-flink/docs/decisions/configurable-odt-bucketing.md) (the ADR, incl. the §3.3 pre-enable gate) and [`docs/concepts/stacks.md`](../../src/etherbi-flink/docs/concepts/stacks.md) (the load-bearing invariant). The `santiment-cheatsheets` analysis notes remain the deeper derivation.
 
 ---
 
@@ -481,3 +487,129 @@ Read `HandlerOneAccountChange.scala` + `ComputeAccountStackChangesTimeWindow.sca
 - clickhouse-tables branch `batchStacksOdtXRP`: DO_NOT_MERGE yaml + context.py partition patch (both marked), `.env.dev`, table_qa tests; experimental tables populated (validated, §13).
 - devops branch `batchStacksOdtXRP`: two values-file edits (above), uncommitted.
 - Pending decisions/actions: savepoint comparison + gauge readout (protocol §14); prod-defect escalation bundle (§13); NPL product call (§12 quantification); PR #2270 adoption; rollout to next chains.
+
+---
+
+## 16. ⚠ Finding — daily metrics were never recomputed; §13 sign-off covered intraday only (2026-07-06)
+
+**What the §13 sign-off actually measured, on inspection:** intraday metrics only. Confirmed against the live experimental tables:
+
+| table | rows | metric_ids | assets | range |
+|---|---|---|---|---|
+| `intraday_metrics_experimental` | 100.98 M | 78 | XRP 2053 | 2013-01-01 → 2025-05-31 |
+| `distribution_deltas_5min_experimental` | 1.102 B | **only 162** (intraday emitter) | 2053 | 2013 → 2025-05 |
+| `daily_metrics_v2_experimental` | **0** | — | — | **empty** |
+
+**Root cause:** the harness (`xrp_intraday_experimental_DO_NOT_MERGE.yaml`, §7) is intraday-only *by construction* — it re-expresses just the 10 intraday jobs. No daily job ever ran, so (a) the daily seam emitter never fired and (b) no daily consumer wrote. Prod's XRP seam holds **both** `metric_id 162` (intraday 5-min, 2.15 B rows) **and `270` (`age_distribution_1day_delta`, the daily emitter, 3.35 M rows)**; experimental has only 162. This is the same "our job set doesn't compute 270" note from §12, now understood as a *coverage gap*, not a filtering footnote.
+
+**Daily metrics DO depend on stacks** — they read the same `distribution_deltas_5min` seam we already populated. §13's clean bill for daily rested on the §14 *analytical* invariance argument (hourly bucketing keeps `odt` within the same calendar day → `toDate(odt)` exactly preserved → day-windowed metrics cancel), never on computed numbers. That argument is sound for pure `toDate(odt+period)` cancellation but is **unverified** and does not self-evidently cover `creation_timestamp`, `supply_in_profit`, `spent_coins_age_bands`, or the `_1day` rollups. **§6.3 (added this session) now makes the daily comparison a required empirical gate.**
+
+**XRP daily stacks chain to run** (generic label-selected cronjobs in `specs.d/cronjobs/*`, `xrp-*` entries; selector `stacksMetrics + xrp`, `distributionFunction: distribution_deltas.XRPDistribution[WithAcquisitionPrice]`), in dependency order:
+1. **Emitter:** `xrp-age-distribution-1day-deltas` (`age_distribution_1day_job`) → writes `metric_id 270` into `distribution_deltas_5min_experimental`.
+2. **Consumers:** `xrp-circulation-deltas`, `xrp-realized-cap-deltas`, `xrp-dormant-circulation`, `xrp-stack-age-consumed`, `xrp-stack-price-consumed`, `xrp-creation-timestamps-deltas` (+`-intervals`, `-dollar-…-intervals`), `xrp-spent-coins-age-bands`, `xrp-transaction-volume-profit-loss`, `xrp-supply-in-profit`.
+3. **Rollups/composites:** `xrp-cumulative-sums`, `xrp-composite-metrics`, `xrp-composite-delta-metrics` (daily `mvrv`/`mrp`).
+   - Same run vehicle as intraday: add these to `DAILY_JOBS`; they need the daily-metrics writes redirected to `daily_metrics_v2_experimental` (verify `.env.dev` covers the daily table) and the daily emitter must precede its consumers. Excluded (not stacks-dependent): DAA/network-growth/payment-count/transaction-count/-volume/whale/exchange-supply/holders-distribution/std-dev/daa-divergence.
+
+**Status change:** the XRP sign-off is **INCOMPLETE** against the amended §6 — §6.1 (Layer 1) and §6.2 (intraday) hold; **§6.3 (daily coverage) is unmet** until the daily chain is computed into `daily_metrics_v2_experimental` and diffed against prod. Expectation per §4: daily deviations exact within float noise — but this must be *shown*.
+
+**Next action:** run the daily chain above (yearly-chunked like stage-1, then genesis cumsum/composite), Phase-2 coverage check on `daily_metrics_v2_experimental`, then extend `compare_xrp_experimental.py` to diff the daily table per metric_id and report the daily metric count + max deviation.
+
+### 16.1 Daily run config (drafted 2026-07-06)
+
+**Redirect coverage — already complete.** `.env.dev` sets `DAILY_DAILY_METRICS_TABLE=daily_metrics_v2_experimental` **and** `DAILY_DELTA_FUTURES_TABLE=daily_delta_futures_experimental` (plus the seam + dt-optimization redirects). **No new redirect needed** — only `DAILY_JOBS` changes; window (2013-01-01 → 2025-06-01) and `DAILY_DRY_RUN` latch stay as-is. The `DAILY_SOURCE_TABLES` (raw `xrp_stacks`→experimental) redirect is a **no-op for daily** — no daily job reads raw stacks; the `1day` emitter and all consumers read the *seam* (`distribution_deltas_5min_experimental`, already redirected). Harmless to leave set.
+
+**No `DO_NOT_MERGE` hack needed (unlike intraday).** All 15 daily jobs are real `kind: DailyMetricsCronJob` docs in `specs.d/cronjobs/*` (label-selected `stacksMetrics + xrp`) → directly loadable by `main.py` + `DAILY_JOBS`. Reuse `scratchpad/run_chunk.sh` with the job lists below.
+
+**Seam dependency map (verified in code, 2026-07-06):** `XRPDistribution`/`…WithAcquisitionPrice` both default to `age_distribution_5min_delta` (**162, present**) — so every consumer except one rolls up the existing 5-min seam. **`supply_in_profit_job` alone reads `age_distribution_1day_delta` (270, ABSENT)** → the `1day` emitter must run first. Acquisition-price consumers (`realized-cap`, `stack-price-consumed`, `transaction-volume-profit-loss`, `supply-in-profit`) use the prod read-only ASOF source (stacks-independent), *not* the daily table.
+
+**Stages (separate invocations — none of the daily jobs declare `dependsOn`, so do NOT rely on intra-invocation ordering; mirror the intraday stage split):**
+
+- **Stage A — `1day` emitter, yearly-chunked** (reads 162 → writes 270 into `distribution_deltas_5min_experimental`):
+  `DAILY_JOBS=xrp-age-distribution-1day-deltas`
+- **Stage B — daily delta/flow consumers, yearly-chunked** (read 162/270 → write `daily_metrics_v2_experimental` + `daily_delta_futures_experimental`):
+  `DAILY_JOBS=xrp-circulation-deltas,xrp-realized-cap-deltas,xrp-dormant-circulation,xrp-stack-age-consumed,xrp-stack-price-consumed,xrp-creation-timestamps-deltas,xrp-creation-timestamps-deltas-intervals,xrp-dollar-creation-timestamps-deltas-intervals,xrp-spent-coins-age-bands,xrp-transaction-volume-profit-loss,xrp-supply-in-profit`
+- **⛔ Seed gate (before Stage C) — daily prices.** `composite_metric_job` reads its deps `FROM daily_metrics_table` (= the empty experimental daily table); daily MVRV/MRP need daily `price_usd` (+ marketcap) that no stacks job produces. Seed from prod (operator write, same class as the BTC precedent seed, §11):
+  ```sql
+  INSERT INTO daily_metrics_v2_experimental
+  SELECT * FROM daily_metrics_v2
+  WHERE asset_id = 2053 AND metric_id IN (2,3,4,5,73,75,76,77) AND dt < '2025-06-01';
+  ```
+  (Confirm the exact ids the composites declare as `free_dependencies` on the dry run; the 8-id bundle is the safe superset. Prod XRP has all 8, 2009→2025-05.)
+- **Stage C — genesis-anchored, single pass** (cumsums must start at genesis; composites divide cumsum outputs → run after):
+  `DAILY_JOBS=xrp-cumulative-sums,xrp-composite-metrics,xrp-composite-delta-metrics`
+
+**Dry-run asserts (before flipping `DAILY_DRY_RUN=false`), extending §11:**
+1. Every generated SQL reads only experimental/intended-prod-read-only tables and **writes only `daily_metrics_v2_experimental` / `daily_delta_futures_experimental`** (grep the dry-run SQL — the safety assert).
+2. **Ordering:** confirm the topo sort places `xrp-age-distribution-1day-deltas` (270 producer) before `xrp-supply-in-profit` (270 consumer). If it does *not* (the 270 edge is a raw-SQL `dictGet`, may be invisible to the factory graph), Stage A being a separate prior invocation already guarantees it — so keep A and B split, do not merge.
+3. Partition guard: the `max_partitions_per_insert_block: 0` context.py patch (§11) is global on the CH client → covers `daily_metrics_v2` (~149 monthly partitions) too. No extra change.
+
+**Then:** Phase-2 coverage on `daily_metrics_v2_experimental` (per-month, per-metric_id counts; only asset 2053; continuous 2013→2025-06), and extend `compare_xrp_experimental.py` with a `daily_metrics_v2` diff path (per metric_id p50/p99 + max abs/rel deviation) on the pristine window `[2013-01-01, 2025-03-31]`. Expectation per §4: **exact within float noise** — report the daily metric count and the worst deviation; any non-noise daily deviation is a finding.
+
+### 16.2 Dry-run verdict (2026-07-06) — all preflight asserts PASS; staging simplified to 2 stages
+
+Prices seeded by operator (asset 2053, all 8 ids, full history — confirmed present). Dry run: full 15-job daily chain, window 2013-01-01→2013-04-01, `DAILY_DRY_RUN=true`, **exit 0, no crashes** (cleaner than the intraday dry run, which hit tmp-table read crashes — the daily chain doesn't). Log: `$CLAUDE_JOB_DIR/tmp/daily_dryrun.log` (session-local).
+
+- **Write surface = 100% experimental** (the prod-write safety condition): persistent INSERTs go only to `daily_metrics_v2_experimental` (78), `daily_delta_futures_experimental` (24), `distribution_deltas_5min_experimental` (1, the 270 emitter). Ephemeral scratch (framework-standard): `tmp_metric_table`, `tmp_delta_futures`. **Zero** INSERT/FROM/JOIN against any bare `daily_metrics_v2` / `distribution_deltas_5min` / `intraday_metrics` / `xrp_stacks` (grep-asserted).
+- **Read surface** = `distribution_deltas_5min_experimental` (seam, incl. `acquisition_price` for the WithAcquisitionPrice consumers → no `intraday_metrics_historic_optimization` needed), `daily_metrics_v2_experimental` (composite deps + delta reads), `intraday_metrics_experimental` (P&L-family `price_usd`, like NPL §12), + read-only prod `metric_metadata_versioned` / `asset_metadata`. All redirected correctly.
+- **Ordering proven in a SINGLE invocation** — the topo sort placed `xrp-age-distribution-1day-deltas` (produces **270**) before `xrp-supply-in-profit` (consumes 270), and `xrp-cumulative-sums` before `xrp-composite-metrics`. The 270 edge and the cumsum→composite edge are both caught by the factory graph. **So the emitter does NOT need a separate prior invocation** — the "keep A and B split" caveat above is retired.
+- **Seed confirmed used:** the composite reads price ids **2, 73, 75** (`daily_closing`/`avg_price_usd`, `avg_marketcap_usd`) from `daily_metrics_v2_experimental`. The 8-id seed is a sufficient superset.
+
+**Revised staging (mirrors the intraday stage-1/stage-2 split exactly):**
+1. **Stage 1 — chunked yearly 2013→2025-06** (`DAILY_START_DATE`/`DAILY_END_DATE` loop; halve any chunk that OOMs/times out): emitter + all 11 delta/flow consumers **in one `DAILY_JOBS` list** — ordering is handled per-invocation, and each yearly chunk is self-contained (its emitter writes that year's 270 before its supply-in-profit reads it; cross-year cancels are computed by the later chunk reading the earlier seam, as intraday §12).
+   `DAILY_JOBS=xrp-age-distribution-1day-deltas,xrp-circulation-deltas,xrp-realized-cap-deltas,xrp-dormant-circulation,xrp-stack-age-consumed,xrp-stack-price-consumed,xrp-creation-timestamps-deltas,xrp-creation-timestamps-deltas-intervals,xrp-dollar-creation-timestamps-deltas-intervals,xrp-spent-coins-age-bands,xrp-transaction-volume-profit-loss,xrp-supply-in-profit`
+2. **Stage 2 — genesis-anchored single pass 2013→2025-06** (cumsums un-chunkable; composites divide cumsum outputs → after):
+   `DAILY_JOBS=xrp-cumulative-sums,xrp-composite-metrics,xrp-composite-delta-metrics`
+
+**Daily metric_ids in scope for comparison** (from the dry-run job headers): circulation 21–32, realized-cap 49–60, stack-age-consumed 8, stack-price-consumed 102, dormant 405–412/788/789, creation-timestamp 90/173 (+intervals 1320–1325, dollar 1330–1335), spent-coins-age-bands 1254–1265, tx-volume-P/L 1203/1204, supply-in-profit 786, composite-delta 98; cumsum levels + daily composites (MVRV/MRP families) per the Stage-2 headers. **Only gate remaining: operator OK to flip `DAILY_DRY_RUN=false`** (fresh prod writes, `_experimental`-only — verified above).
+
+### 16.3 Why prod is not a valid daily baseline — fossil root-cause, localized (2026-07-06)
+
+**Question raised:** the transactions are immutable, so a 2015 metric *should* recompute to the same value regardless of when/what code — where does prod's stored value actually diverge from a fresh recompute? Localized it to a single node with a controlled experiment (all read-only; daily run already complete):
+
+**The pipeline is deterministic for non-price metrics.** Recomputing `stack_age_consumed` (8) *today* from **prod's own current seam** reproduces prod's **stored** value **exactly — `recompute/stored = 1.000`, every year 2013–2024** (p50=p99=0). `computed_at` shows the seam (162) and the metric are the *same generation* (both frozen ~2020–2021; seam per dt-year: 2013→2020-08 … 2020→2021-01, then frontier-time onward). So where nothing changed, "semantically identical" **holds** — prod fossils are faithful to their inputs. This is the control.
+
+**The divergence is isolated to the acquisition-price step, and it's a dated methodology + architecture change — NOT the bucketing.** `stack_price_consumed` (102) is byte-identical to metric 8 except one factor:
+- 8:  `sum(−amount · (dt−odt))/86400`  → reproduces prod at **1.000**
+- 102: `sum(−amount · **acquisition_price** · (dt−odt))/86400` → reproduces prod at **0.000** every year 2013–2024
+
+The only structural difference is `× acquisition_price`, so the entire 102 non-reproducibility is attributable to acquisition-price. Root cause, two stacked changes:
+1. **Resolution:** commit `352af466` (2022-03-09, "Add transaction profit loss metrics") changed the ASOF grid `toStartOfHour(odt) → toStartOfFiveMinute(odt)`; `46646997` (2022-03-11) reworked the NPL/price-consumed/tx-volume price joins. Hourly-avg acquisition price → 5-min-avg.
+2. **Architecture:** acquisition price moved from *on-the-fly* (the 2022 join to intraday prices, inside the metric job) to a *precomputed seam column*. That column is **NULL for 100% of prod's historical seam rows** (measured: 0 of 18.9M in 2018; exp seam is 99.9% populated), so current code cannot rebuild the price metrics from prod's seam at all (hence `recompute/stored = 0`; 2025 = 0.54 as the column only started being persisted recently). Prod's stored 102 was produced by the old on-the-fly hourly path (computed 2020–2021) and frozen.
+
+**Scope of the fossil:** exactly the acquisition-price family — `realized_cap` → `mean_realized_price`/`MVRV`, `stack_price_consumed`, `network_profit_loss`, `transaction_volume_profit_loss`, `supply_in_profit`. Every **pure-age** metric (circulation, dormant, age-consumed, creation-timestamp, age-bands) is fossil-free and reproduces exactly; its exp-vs-prod gap is bucketing-only (~1e-4). This matches the earlier contaminated prod-diff (metric 8 p50 6.3e-5 vs 102 p50 1.2e-3 vs P&L ~90%).
+
+**Consequence (the reason for the `_nb` baseline):** prod's stored **price-weighted** daily metrics are fossils of a pre-2022 methodology and are *not reproducible* without re-deriving acquisition price. So prod stored values cannot serve as the bucketing baseline for that family. The clean comparison must recompute both batched and non-batched sides under **today's** code — the `_nb` recompute (§16.2 discussion). Pure-age daily metrics *can* be compared against prod directly (they're deterministic), but for uniformity the `_nb` set covers both.
+
+**Team one-liner:** *Non-price stack metrics recompute from prod's own seam bit-exactly (proven on `stack_age_consumed`, 0 divergence all years). Price-weighted metrics don't (0.000) — the acquisition-price computation changed resolution (hourly→5-min, commit `352af466`, 2022-03-09) and moved on-the-fly→seam-column (NULL for all historical prod rows). Prod's historical price metrics are pre-2022-methodology fossils; that's why the bucketing baseline must be a fresh non-batched recompute, not prod.*
+
+### 16.4 Third mechanism — PR #2132 INNER-JOIN data loss (CONFIRMED 2026-07-06); corrects the §12/§13 "frontier gap" attribution
+
+A third, distinct root cause, surfaced by the team (PR [#2132](https://github.com/santiment/clickhouse-tables/pull/2132) "Use LEFT ASOF join instead of INNER"):
+
+**Bug:** the seam emitter attached acquisition price via an **INNER JOIN** between stack cohorts and the price grid on `acquisitionTime = toStartOfFiveMinute(odt)`. A cohort whose acquisition 5-min bucket has **no price row is dropped entirely** (measure and all) — silent source-data loss, not a staler price. Fix = `LEFT ASOF JOIN` to the nearest prior price.
+- **Introduced:** `84ec2023` "Add acquisition price to distribution deltas", **2025-03-19**. **Fixed:** `d678ad9a` / #2132, **2026-03-02**. Live ~11.5 months (NOT "a few years"). Affects only price-carrying seam rows **computed** in that window (frontier dts ~2025-03→2026-03, plus any backfill run then).
+- **Our exp run has the fix:** branch `batchStacksOdtXRP` contains the merge; XRP's emitter `age_distribution_intraday_job` uses `LEFT ASOF JOIN` (line ~126). So exp is clean; prod seam rows computed in the buggy window are not.
+
+**Systematic footprint:** drops any cohort whose acquisition time has no price — i.e. everything acquired **before the asset's price-data start** (XRP: **2013-08-04 18:50**). For XRP that's the huge genesis/pre-price cohort; every pop of those ancient coins processed during the buggy window vanished from the seam.
+
+**Confirmation (measured 2026-07-06):** seam rows for dt ∈ [2025-04-01, 2025-06-01), cohorts with `odt < 2013-08-04`:
+
+| seam | cells | Σ\|measure\| |
+|---|---|---|
+| exp (LEFT ASOF, fixed) | **197** | **35,481,653** |
+| prod (INNER, buggy window) | 11 | 10,846 |
+
+Prod dropped ~186 cells / **35.48M XRP** of pre-price-cohort movement — **this is precisely the "~35M XRP of 2013-cohort pops missing Apr–May 2025" that §12/§13 flagged.**
+
+**⚠ Correction to §12/§13:** those sections attributed the Apr–May 2025 seam omissions to a *"live-emitter frontier gap (seam computed before raw rows arrived / window miss)."* **That is wrong — the cause is PR #2132's INNER JOIN** dropping pre-price-data cohorts. The raw table had the rows (§12's spot-check: v8 ≡ v9, both contain the pop); the seam emitter dropped them at the price join. (The §9 *508-missing-blocks* + *LIFO corruption from 2025-06-17* remain a separate, raw/Flink-level defect — that one really is upstream of the seam.)
+
+**Implications:**
+- **Prod-wide, all chains:** any price-carrying seam / age-price / realized-cap / dormant / supply-in-profit value computed 2025-03-19→2026-03-02 is missing pre-price-data cohorts. Historical data computed in that window stays wrong until recomputed. Escalate alongside the §13 bundle (this one is *our* bug, already fixed forward, but historical values need a rebuild).
+- **`_nb` baseline design:** reading prod's seam as the non-batched baseline **inherits #2132's drops for any dt computed in the buggy window**. Safe for the pristine window `[2013, 2025-03-31]` (those seam rows were computed pre-2025-03 per `computed_at`); for anything later the `_nb` seam must be **recomputed from raw with the fix** (gold-standard path). The pristine window already ends before the damage, so the primary Layer-2 comparison is unaffected.
+
+**Three-mechanism taxonomy (all dated, all distinct):**
+| # | mechanism | commit / date | what it explains |
+|---|---|---|---|
+| 1 | acq-price resolution + on-the-fly→seam-column | `352af466` 2022-03-09; `84ec2023` 2025-03-19 | historical price-family fossils (recompute 0.000) |
+| 2 | INNER→LEFT ASOF (drops pre-price cohorts) | `84ec2023` 2025-03-19 → #2132 2026-03-02 | 2025 seam omissions (~35M XRP), pre-price genesis cohorts |
+| 3 | raw v8 Flink defect (508 blocks + LIFO) | ~2025-06-17 onward | raw-level pops absent from balances-confirmed source |
