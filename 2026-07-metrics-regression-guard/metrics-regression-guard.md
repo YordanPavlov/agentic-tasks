@@ -68,8 +68,11 @@ docker-airflow (PR #1714, branch `metricsQA`):
 
 ## 7. Open items / next steps
 
-1. **On recompute completion:** coverage check (per-metric row counts in `intraday_metrics_guard`/`daily_metrics_v2_guard`, continuous 2015→2017, asset 1681 only).
-2. **Re-record the ETH baseline from `*_guard`** (`record … _guard`) → replaces the served-prod seed with HEAD-computed truth (years 2015–2017).
+> ⚠ **MERGE BLOCKED** — baseline not blessable until re-seeded + re-run + re-recorded (see §11). Do items 0–2 before 4.
+
+0. **[DONE 2026-07-08] Seed intraday `price_usd`** into `intraday_metrics_guard` — `guard_seed_prices.py` extended to seed daily **and** intraday price (commit on `metricsQA`). Fixes the `transaction_volume_profit/_loss/_ratio` zero-fill (§11.2). Operator to run `python -m table_qa.guard_seed_prices ethereum 2017-01-01` before the re-run.
+1. **Re-run the ETH recompute** with intraday price present up front (correct input ordering), then coverage check (per-metric row counts, continuous 2015→2017, asset 1681).
+2. **Re-record the ETH baseline from `*_guard`** — `transaction_volume_profit/_loss/_ratio` will become nonzero; **hold the NPL / price-weighted family** until the genesis-valuation defect is fixed (see spun-off task [`../2026-07-genesis-acquisition-price-valuation/`](../2026-07-genesis-acquisition-price-valuation/genesis-acquisition-price-valuation.md)) — do not bless 559M.
 3. **Diff `*_guard` vs served** → the ETH fossil-gap measurement (the §1 diagnostic).
 4. **Merge #2274 + #1714 → deploy the nightly DAG** (rebuilds `master` image with the guard code + blessed baseline).
 5. **Roll out** to more chains (add a `FIXTURES` entry + record its baseline; BTC = the UTXO stack path).
@@ -166,3 +169,9 @@ NPL ran after the price seed (15:23), so its guard value is real HEAD output: gu
 - **Guard implication:** NPL (and the dollar-days / realized-cap price-weighted family) should be treated as **fix-first, then bless** — do not bless 559M. The guard correctly *surfaced* this as a divergence; that's the guard working as intended (it caught a real, if pre-existing, defect).
 
 **Net:** baseline is **not blessable as-is** (3 spurious-zero metrics from the intraday-price seed gap; NPL-family bless-vs-fix question open). Do NOT merge until intraday price is seeded, the recompute re-run, and the baseline re-recorded + re-reviewed.
+
+### 11.5 Session wrap — 2026-07-08
+
+- **(a) intraday-price seed gap: FIXED + pushed.** `table_qa/guard_seed_prices.py` now seeds daily **and** intraday `price_usd` into the guard tables (only `price_usd` needed — no in-scope consumer for intraday marketcap/volume/price_btc/price_eth). DAG picks it up automatically (its `seed-prices` pod already calls this module; order `seed >> assert >> recompute >> check` is correct). Operator will run it manually + re-run the recompute in a later session.
+- **(b) NPL genesis-valuation defect: root-caused to PR #2132, spun out.** New standalone task [`../2026-07-genesis-acquisition-price-valuation/`](../2026-07-genesis-acquisition-price-valuation/genesis-acquisition-price-valuation.md) — the LEFT-ASOF fix values the ETH genesis/premine cohort at `acquisition_price = 0` (unmatched + default `join_use_nulls=0`) → NPL 281M→559M. To be fixed there before the guard blesses the price-weighted family.
+- **Deferred to next session:** run the seed, re-run the ETH recompute (intraday price up front), re-record baseline for the reproducible set (hold NPL/price-weighted family pending the #2132 fix), then merge #2274 + #1714.
