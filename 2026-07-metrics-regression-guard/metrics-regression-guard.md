@@ -115,3 +115,43 @@ docker-airflow (PR #1714, branch `metricsQA`):
 **Conclusion:** ETH's served history is **mostly reproducible** by HEAD code; fossils are **concentrated in the price/profit family** (acquisition-price methodology change + NPL identity/regime) — the same signature as XRP, now confirmed chain-consistent. **Full coverage was essential:** the 11-metric sample hit `realized_cap`/`MVRV`/`MRP` at 1d (which reproduce) and missed the entire NPL family + `_7d`/`_30d`/dollar-days variants (which don't). The guard is validated end-to-end with full 539-metric coverage; baseline committed (`f1189aed`).
 
 **Next:** merge #2274 + #1714 → deploy nightly DAG; optionally drill the `transaction_volume_profit_loss` ∞ divergence to confirm the XRP identity story; roll out to more chains.
+
+---
+
+## 11. Session log — 2026-07-08 — baseline audit before blessing (⚠ BASELINE NOT BLESSABLE AS-IS)
+
+Slowed down before merging to verify the committed baseline values are the ones we want to bless. Two findings; the first **blocks the merge**.
+
+### 11.1 "Two dropped metrics" (539 vs 537) — benign
+
+Journal §6/§10 said 539 (119 intraday + 420 daily); the committed file has **537** (119 + 418). Reconciled against `*_guard`:
+- Guard produces (2016): 119 intraday + **426** daily = 545 distinct.
+- The 8 daily absent from the baseline = **exactly the `guard_seed_prices.py` seed set** (`daily_{closing,opening,high,low,avg}_price_usd`, `daily_{avg,closing}_marketcap_usd`, `daily_trading_volume_usd`) — seed **inputs**, correctly not asserted (circular). `record_baseline` only records names in its supplied list (`metric_baselines.py:307`), which never included the seeds.
+- **Conclusion:** 537 computed metrics, baseline asserts 100% of them. Zero computed metrics dropped. "539" was a miscount → fix to 537.
+
+### 11.2 The profit/loss "∞ fossils" are a GUARD-HARNESS ORDERING ARTIFACT, not fossils — ⚠ BLOCKER
+
+§10 listed `transaction_volume_profit`/`_loss`/`_ratio` as "severe fossils (rel 0.5→∞)". They are **not fossils** — the baseline recorded **spurious zeros** from a job-ordering/seed race:
+
+- `transaction_volume_profit` baseline = **0.0** (all 366 days of 2016); served = 327M. But **re-running the exact profit query now against the guard tables yields ~510k profit for a single day** (nonzero). So the stored 0 is not what HEAD computes from the finished inputs.
+- **Timeline (computed_at, guard):** seam `age_distribution_5min_delta` 14:43–14:59 → `transaction_volume_profit` **15:00** → intraday `price_usd` bulk-loaded into `intraday_metrics_guard` at **15:08:12** (single timestamp, exactly 105 408 rows = 366×288, **1 row/dt** vs served's 2/dt → a manual `INSERT…SELECT`, not a job). NPL ran 15:23 (after price → real value).
+- **Root cause:** `transaction_volume_profit_loss_job` (and NPL) read `price_usd` from `intraday_metrics` (= `intraday_metrics_guard` under the guard config; job lines 65–75). Intraday `price_usd` for ETH is an **external input** — the `intraday-prices` DMF job is named `intraday-prices` (no chain prefix → not matched by the guard's `startswith("eth-")` filter) **and** its assetSelector explicitly excludes eth/btc/erc20/xrp/… So no in-scope job produces it; it must be **seeded**, like daily prices. But **`guard_seed_prices.py` seeds only DAILY prices, not intraday `price_usd`** → gap. In the ETH run the operator bulk-loaded intraday price manually at 15:08, *after* `main.py` had started (14:59) and already run the profit jobs at 15:00 → their INNER JOIN against an empty price table matched nothing → only the `UNION ALL` zero-fill landed → all-zero.
+- **Blast radius:** exactly the 3 metrics that INNER-JOIN intraday `price_usd` **and** ran in the 15:00–15:08 gap: `transaction_volume_profit`, `transaction_volume_loss`, `transaction_volume_profit_loss_ratio`. All other price consumers ran after 15:08 (NPL 15:23, realized_cap/mvrv read the seam not intraday price). `stack_price_consumed` (73.8B) and `whale_transaction_count` (677) ran before 15:08 yet **match served exactly** — they read the seam's stored `acquisition_price`, not intraday price.
+- **Why this blocks the merge:** the baseline asserts 0 for these 3 (a known-false value); once intraday price is seeded properly, HEAD produces nonzero → the guard would go **red on its first correct run** (or stay green-but-wrong if the race recurs). Blessing 0 blesses a harness bug.
+
+**Fix (proposed):** extend the seed step to also seed **intraday `price_usd`** into `intraday_metrics_guard` before the recompute — either in `guard_seed_prices.py` or a sibling `guard_seed_intraday_prices.py`, run in the DAG's `seed-prices` step **before** `recompute`. Then re-run the recompute (correct input-presence) and **re-record** the baseline. Also consider an **input-presence gate** (sibling to the write-surface gate): assert every external input a job reads (intraday price) is present for the window before running — the topo sort orders *computed* jobs but cannot order an external input (see §11.3).
+
+### 11.3 Does the framework guard job ordering? YES for computed jobs; NO for external inputs
+
+- The DMF **does** topologically sort: `main.py` → `fetch_jobs` → `job_factory.sort_factories` builds an `igraph` dependency graph from metric `depends_on` and runs jobs in `topological_sorting()` order. So ordering **among jobs the run computes** is guarded — the profit-vs-seam ordering was fine (seam 14:43 < profit 15:00).
+- The failure is **outside** the topo sort's reach: intraday `price_usd` is produced by **no in-set job** (external input). Such deps become an **"unspecified-job"** vertex (`job_factory.py` `factory_graph`) — assumed to already exist. Nothing in the guard pipeline gates that these external inputs are present before the run; the write-surface gate checks *outputs*, not *input presence*. That's the missing guard.
+
+### 11.4 The GENUINE fossil (NPL) — and a caveat on "bless HEAD-truth"
+
+NPL ran after price, so its guard value is real HEAD output: guard **559.6M** vs served **281.1M** (2016). Decomposed on the guard seam:
+- NPL from `acquisition_price > 0` rows = **281.06M** — *exactly* served NPL.
+- NPL from `acquisition_price = 0` rows = **+278.53M** (spurious) → guard total 559.59M.
+- **Cause:** NULL-vs-0 handling of missing acquisition price. Served **excludes** cohorts with no acquisition price (stored NULL: served seam has 57 054 NULLs, 0 zeros). The HEAD-recomputed guard seam stores them as **0** (guard seam: 0 NULLs, 41 037 zeros), so `(current_price − 0)·−amount` books the full current price as profit and ~doubles NPL. **Served (281M) is arguably the more-correct value; HEAD's 559M is inflated by treating pre-price-data cohorts as acquired at price 0.**
+- **Caveat for the design (§8 "bless HEAD-truth"):** for NPL, HEAD-truth is a *worse* number than served. Blessing it locks in the 0-fill inflation. Open question: is the NULL→0 change intended current behavior (then bless, and the guard documents it), or a latent bug in the seam builder (then fix first)? Ties to the acquisition-price ASOF methodology thread (§0: `352af466` toStartOfHour→toStartOfFiveMinute; PR #2132 INNER-JOIN cohort drop). Needs the seam-builder git archaeology + a product call.
+
+**Net:** baseline is **not blessable as-is** (3 spurious-zero metrics from the intraday-price seed gap; NPL-family bless-vs-fix question open). Do NOT merge until intraday price is seeded, the recompute re-run, and the baseline re-recorded + re-reviewed.
