@@ -18,9 +18,6 @@ ADRs, reusable procedures → agent skills, prod defects → tracker issues.
 - Directory per task: `YYYY-MM-<kebab-slug>/`, dated by task start.
 - Keep the journal append-only during the task (session logs with dates); the
   top of the main doc says what the task IS, session logs say what happened.
-- Root-level symlinks exist for pre-repo absolute paths (older docs/agent
-  memories reference `~/santiment/tasks/<old-name>`); don't add new ones for
-  new tasks.
 - Update the status column here on every significant milestone. A pre-commit
   hook (`.githooks/`, enabled via `core.hooksPath`) rejects commits that touch
   a task directory without touching this file.

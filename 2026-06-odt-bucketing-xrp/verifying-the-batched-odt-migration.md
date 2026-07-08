@@ -261,7 +261,7 @@ cd daily_metrics && python3 main.py            # flip DAILY_DRY_RUN=false to wri
 ```
 Confirm on the dry run that the emitter sorts before its consumers and deltas before cumsum/composite (LTC hit a missing `dependsOn`). Then:
 ```bash
-~/santiment/tasks/ltc-migration/compare_ltc_experimental.py \
+~/src/agentic-tasks/2026-06-ltc-stacks-deprecation/compare_ltc_experimental.py \
   --asset xrp --start 2013-01-01 --end 2018-08-01 --table all --meta-table metric_metadata
 ```
 Expectations per §4: ~2% bounded on 1d intraday, →0 by 7–30d, daily exact, unaffected metrics unchanged.
@@ -348,7 +348,7 @@ Two operational decisions, both pre-answered by the LTC run (`ltc-stacks-depreca
 
 ## 12. Session log — Phase 1 stage-1 running; first-year (2013) analysis (2026-07-03)
 
-**Run mechanics:** chunk runner `scratchpad/run_chunk.sh` (sources `.env.dev`, overrides `DAILY_DRY_RUN=false` + window + the 7 stage-1 jobs; the on-disk latch stays `true`). 2013 chunk: **178 s** for all 7 jobs (9 sub-jobs); 2014: ~7 min. Sequential loop 2014→2025-06 launched (aborts on first non-zero rc). Comparison tool: `~/santiment/tasks/xrp-odt-migration/compare_xrp_experimental.py` (hour-truncated distribution rollup; p50/p99; verdict on median).
+**Run mechanics:** chunk runner `scratchpad/run_chunk.sh` (sources `.env.dev`, overrides `DAILY_DRY_RUN=false` + window + the 7 stage-1 jobs; the on-disk latch stays `true`). 2013 chunk: **178 s** for all 7 jobs (9 sub-jobs); 2014: ~7 min. Sequential loop 2014→2025-06 launched (aborts on first non-zero rc). Comparison tool: `~/src/agentic-tasks/2026-06-odt-bucketing-xrp/compare_xrp_experimental.py` (hour-truncated distribution rollup; p50/p99; verdict on median).
 
 **Chunk-boundary note (validates time-outer ordering as *necessary*):** the futures/cancel rows written by a chunk only cover its own window — cancels from year-Y events landing in Y+1 are computed by the Y+1 chunk reading the already-present year-Y seam. Chunks must therefore run in time order.
 
