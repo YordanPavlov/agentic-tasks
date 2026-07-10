@@ -68,10 +68,11 @@ docker-airflow (PR #1714, branch `metricsQA`):
 
 ## 7. Open items / next steps
 
-> ⚠ **MERGE BLOCKED** — baseline not blessable until re-seeded + re-run + re-recorded (see §11). Do items 0–2 before 4.
+> ⚠ **MERGE BLOCKED** — baseline not blessable until re-run + re-recorded. §11's intraday-seed plan was **superseded by §12** (2026-07-10): the zero-fill root cause is an undeclared `dependsOn`, now fixed in the metric specs; NO intraday seeding. Also see §12.3: the 07-07 run **leaked 1.89M rows into prod `labeled_intraday_metrics_v2`** — remediation pending.
 
-0. **[DONE 2026-07-08] Seed intraday `price_usd`** into `intraday_metrics_guard` — `guard_seed_prices.py` extended to seed daily **and** intraday price (commit on `metricsQA`). Fixes the `transaction_volume_profit/_loss/_ratio` zero-fill (§11.2). Operator to run `python -m table_qa.guard_seed_prices ethereum 2017-01-01` before the re-run.
-1. **Re-run the ETH recompute** with intraday price present up front (correct input ordering), then coverage check (per-metric row counts, continuous 2015→2017, asset 1681).
+0. **[SUPERSEDED — see §12.1]** ~~Seed intraday `price_usd`~~ — reverted; `eth-intraday-prices` computes it in-run from `asset_prices_v3`, ordered via `dependsOn`.
+0b. **Remediate the labeled-table contamination (§12.3)** — operator decision: surgical `ALTER DELETE` by `log_comment` fingerprint + notify the labeled-balances owner (bulat-l) since 07-08/07-10 organic backfills may have consumed our delta rows.
+1. **Re-run the ETH recompute** (now 53 jobs, no seed step needed), then coverage check (per-metric row counts, continuous 2015→2017, asset 1681; prices job must run FIRST and profit metrics be nonzero).
 2. **Re-record the ETH baseline from `*_guard`** — `transaction_volume_profit/_loss/_ratio` will become nonzero; **hold the NPL / price-weighted family** until the genesis-valuation defect is fixed (see spun-off task [`../2026-07-genesis-acquisition-price-valuation/`](../2026-07-genesis-acquisition-price-valuation/genesis-acquisition-price-valuation.md)) — do not bless 559M.
 3. **Diff `*_guard` vs served** → the ETH fossil-gap measurement (the §1 diagnostic).
 4. **Merge #2274 + #1714 → deploy the nightly DAG** (rebuilds `master` image with the guard code + blessed baseline).
@@ -175,3 +176,33 @@ NPL ran after the price seed (15:23), so its guard value is real HEAD output: gu
 - **(a) intraday-price seed gap: FIXED + pushed.** `table_qa/guard_seed_prices.py` now seeds daily **and** intraday `price_usd` into the guard tables (only `price_usd` needed — no in-scope consumer for intraday marketcap/volume/price_btc/price_eth). DAG picks it up automatically (its `seed-prices` pod already calls this module; order `seed >> assert >> recompute >> check` is correct). Operator will run it manually + re-run the recompute in a later session.
 - **(b) NPL genesis-valuation defect: root-caused to PR #2132, spun out.** New standalone task [`../2026-07-genesis-acquisition-price-valuation/`](../2026-07-genesis-acquisition-price-valuation/genesis-acquisition-price-valuation.md) — the LEFT-ASOF fix values the ETH genesis/premine cohort at `acquisition_price = 0` (unmatched + default `join_use_nulls=0`) → NPL 281M→559M. To be fixed there before the guard blesses the price-weighted family.
 - **Deferred to next session:** run the seed, re-run the ETH recompute (intraday price up front), re-record baseline for the reproducible set (hold NPL/price-weighted family pending the #2132 fix), then merge #2274 + #1714.
+
+---
+
+## 12. Session log — 2026-07-10 — §11 root cause revised; prod-write incident found & gated
+
+Operator pushed back on §11's "seed intraday price" plan ("intraday should be computed as part of the run, reading from the prices table"). Re-investigated; the operator is right, and the trail led to a genuine prod-write incident. Commits: clickhouse-tables `184d7eac`/`a04c668b`/`c7ca1e25`, docker-airflow `3e72918e` (both `metricsQA`, pushed).
+
+### 12.1 §11.2 was wrong twice — the real root cause is an UNDECLARED dependsOn
+
+- **`eth-intraday-prices` IS in the guard's job set.** §11.2 looked at the generic `intraday-prices` job (which indeed excludes eth); the chain-prefixed `eth-intraday-prices` (specs.d/dags/intraday-metrics-eth.yaml, script `intraday_prices_job`, source `prices.Prices` → raw **`asset_prices_v3`**) is matched by the `eth-` filter and was in the 07-07 run (proof: it's in the 07-07 rows' `log_comment` job list, §12.3). `asset_prices_v3` has ETH 2015–2016 data (source `coinmarketcap` = `config.prices_source` default) from **2015-08-07 14:49** — the run can compute intraday `price_usd` itself; no seeding.
+- **The "manual bulk load at 15:08:12" never happened** — that was the prices job itself. `intraday_prices_job` writes all records with one client-side `now()` (single computed_at), 1 row/dt; the "105 408 rows" in §11.2 was the 2016-only slice (366×288); the full 15:08:12 batch is 147 567 rows (2015-08-07 → 2016-12-31) — exactly what today's dry run recomputes ("Inserting 147567 records"). Operator confirmed they only seeded DAILY prices.
+- **Root cause of the zero-fill:** `transaction_volume_profit/_loss` declared **no** `dependsOn` and `network_profit_loss` only the seam, while their jobs read `price_usd` from `intraday_metrics` (= the run's own output under guard redirects). The topo sort was free to schedule the prices job after them — and did (dry run: prices dead last; 07-07 real run: prices 15:08 vs profit 15:00). NPL's nonzero value was luck (it ran 15:23 > 15:08).
+- **Fix (the DMF-level one, benefits any from-scratch recompute):** declare the real inputs — `price_usd/2019-01-01` (+ seam for the tx-volume pair) in `network_profit_loss_metrics.yaml`. Verified: prices job now sorts FIRST (dry run line 7278, before profit 151542 / NPL 157032). `guard_seed_prices.py` reverted to daily-only (a **one-time operator prerequisite** per chain/window, not a nightly step); the DAG's seed pod removed (chain: `assert >> recompute >> check`).
+
+### 12.2 Dry-run mode couldn't complete end-to-end — fixed (3 spots); this was a GATE BLIND SPOT
+
+Jobs that read real data mid-run crashed the dry run: session-temp tables were created via `execute_dml` (suppressed when dry) while reads go via `execute_dql` (always executes) → Code 60. Fixed: `create_asset_metadata_temp_table` + `labeled_balance_delta_job`'s scoped table → `execute_dql` (identical single-host client; session-local scratch, no persistent write either way; precedent: `dry_run_csv_pipeline.py:178`); `cumulative_sum_job`'s negative-value debug hook → return on the empty dry-run result. Full 53-job dry run now **rc=0**. Why it matters: the write-surface gate parses dry-run SQL — a job that crashes before emitting its INSERT is INVISIBLE to the gate. That blind spot hid §12.3 on 07-07 (the labeled job crashed in the per-job dry-run validation, so "100% writes → _guard" was true only of the jobs that emitted SQL).
+
+### 12.3 ⚠ INCIDENT: the 07-07 run wrote 1.89M rows into prod `labeled_intraday_metrics_v2`
+
+With the dry run completing, the gate immediately FAILed: `labeled_intraday_metrics_v2` is a write target. `eth-balance-changes-delta-intraday-hourly` + `eth-address-changes-delta-intraday-hourly` run `labeled_balance_delta_job` — **label-based metrics whose names dodge the "label" exclusion substring** — and write to `intraday_label_based_metrics_table_v2`, which `GUARD_OUTPUT_ENV` does not redirect.
+- **Confirmed via the table's own `log_comment` column:** 1 891 048 rows (metric 1168 `labeled_balance_delta`) + 1 127 rows (1170 `balanced_labels_delta`), blockchain `ethereum`, 119 labels, dt 2015-07-30 15:30 → 2017-01-01, computed_at 2026-07-07 ~15:00, log_comment = our run's 55-job list (`"repo": "clickhouse-tables"`, no airflow dag/owner keys — unambiguous fingerprint, and surgical delete key).
+- **Severity:** of 726 445 keys overlapping pre-existing organic rows, only **254 differ** beyond 1e-9 rel — HEAD reproduces the organic values. But ~1.16M keys are NEW (organic backfill hadn't covered them yet), and the `labeled-balances-current` DAG (owner bulat-l) ran historical backfills over 2015–2016 on 07-08 and 07-10 — our rows may already be folded into downstream cumulative label metrics. (Old-dt writes on 06-26/06-30/07-04/07-08/07-10 are all that DAG's organic backfill — attribution matters; today's 1.17M-row batch is organic, NOT from today's dry runs, which wrote nothing.)
+- **Remediation (operator decision, not executed):** `ALTER TABLE labeled_intraday_metrics_v2 DELETE WHERE blockchain='ethereum' AND computed_at BETWEEN '2026-07-07 15:00:00' AND '2026-07-07 16:00:00' AND log_comment LIKE '%eth-active-addresses-intraday-deltas%'` (ReplicatedReplacingMergeTree; replicates automatically), plus notify bulat-l re: possibly-consumed deltas.
+- **Prevention (committed):** `-changes-delta` added to `EXCLUDE_SUBSTR` (ETH set 55 → 53 jobs — surgical, verified); the now-complete dry run means the gate sees every write: final gate = **PASS, 6/6 targets `_guard`**.
+
+### 12.4 State after this session
+
+- Harness ready for the clean re-run: 53 jobs, prices ordered first, gate green, no seeding needed (daily seed already in place from 07-07; intraday computed in-run; stale guard rows are shadowed via `argMax(computed_at)`).
+- Pending operator OK: (a) contamination remediation/escalation; (b) the re-run itself (writes to `*_guard` only). Then §7 items 1–4.
