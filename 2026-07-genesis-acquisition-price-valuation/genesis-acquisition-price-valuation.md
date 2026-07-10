@@ -10,7 +10,7 @@
 >
 > **Author:** Yordan + Claude · **Started:** 2026-07-08
 > **Origin:** spun out of [`../2026-07-metrics-regression-guard/`](../2026-07-metrics-regression-guard/metrics-regression-guard.md) §11.4 — the regression guard surfaced it as a HEAD-vs-served divergence on ETH.
-> **Status:** NOT STARTED (analysis captured; needs fix + product call + backfill scope)
+> **Status:** NOT STARTED on the fix (analysis hardened 2026-07-10 — see §8: mechanism proven, cohort refined, blast radius narrowed; guard validation hook in place)
 
 ---
 
