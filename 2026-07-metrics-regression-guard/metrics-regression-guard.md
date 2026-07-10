@@ -206,3 +206,10 @@ With the dry run completing, the gate immediately FAILed: `labeled_intraday_metr
 
 - Harness ready for the clean re-run: 53 jobs, prices ordered first, gate green, no seeding needed (daily seed already in place from 07-07; intraday computed in-run; stale guard rows are shadowed via `argMax(computed_at)`).
 - Pending operator OK: (a) contamination remediation/escalation; (b) the re-run itself (writes to `*_guard` only). Then §7 items 1–4.
+
+### 12.5 Contamination value-diff (2026-07-10, operator asked "how different is what we inserted?")
+
+Nullable-safe key join (`ifNull(asset_id,0)`), our 1.89M rows vs everything else in `labeled_intraday_metrics_v2` (ethereum, dt<2017):
+- **Overlap with pre-existing organic rows: 726 445 keys → 100% value-identical.** 726 191 within 1e-9 rel; 253 float-noise (1e-9..1e-4); the single ">1%" outlier is `top_100_balance` 2015-11-18 12:00, `-1.34e-10` vs `-6.7e-11` — floating-point dust, numerically zero both sides.
+- **New keys (no pre-existing row): 1 164 616.** Of these, **88 660 were since independently rewritten by the organic 07-08/07-10 backfills — zero disagreements** (≤1e-4 rel). Remaining **1 075 956 still ours-only**: real label deltas (miner 150k keys, whale_usd_balance 79k, centralized_exchange* 78k, top_100_balance 76k, poloniex/bittrex owners…; medians ~70–240 ETH, maxes to 36M for top_100_balance; anachronistic labels like nft_trader/eth2_staking are all-zero rows). Same code path + same current-label-vintage the organic backfill itself uses (it too backfills 2025-vintage labels like `centralized_exchange_20250307` into 2015–2016).
+- **Conclusion: the contamination is value-clean** — foreign provenance and premature coverage, not wrong numbers. Every key where a comparison exists (726k pre + 88.7k post = 815k keys) matches exactly. Deleting by log_comment remains safe (organic re-fills; ReplacingMergeTree + argMax picks later organic rows anyway); keeping is data-safe but leaves rows the labeled pipeline didn't write. Either way, inform bulat-l.
