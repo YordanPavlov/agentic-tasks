@@ -213,3 +213,18 @@ Nullable-safe key join (`ifNull(asset_id,0)`), our 1.89M rows vs everything else
 - **Overlap with pre-existing organic rows: 726 445 keys → 100% value-identical.** 726 191 within 1e-9 rel; 253 float-noise (1e-9..1e-4); the single ">1%" outlier is `top_100_balance` 2015-11-18 12:00, `-1.34e-10` vs `-6.7e-11` — floating-point dust, numerically zero both sides.
 - **New keys (no pre-existing row): 1 164 616.** Of these, **88 660 were since independently rewritten by the organic 07-08/07-10 backfills — zero disagreements** (≤1e-4 rel). Remaining **1 075 956 still ours-only**: real label deltas (miner 150k keys, whale_usd_balance 79k, centralized_exchange* 78k, top_100_balance 76k, poloniex/bittrex owners…; medians ~70–240 ETH, maxes to 36M for top_100_balance; anachronistic labels like nft_trader/eth2_staking are all-zero rows). Same code path + same current-label-vintage the organic backfill itself uses (it too backfills 2025-vintage labels like `centralized_exchange_20250307` into 2015–2016).
 - **Conclusion: the contamination is value-clean** — foreign provenance and premature coverage, not wrong numbers. Every key where a comparison exists (726k pre + 88.7k post = 815k keys) matches exactly. Deleting by log_comment remains safe (organic re-fills; ReplacingMergeTree + argMax picks later organic rows anyway); keeping is data-safe but leaves rows the labeled pipeline didn't write. Either way, inform bulat-l.
+
+### 12.6 Clean re-run + fossil re-analysis + baseline blessed (2026-07-10)
+
+Operator decided: leave the labeled-table contamination in place (§12.5 showed it value-clean) and proceed.
+
+**Clean recompute:** 53 jobs, rc=0, ~35 min. `price_usd` computed IN-RUN at 08:34:24 (run start — dependsOn ordering works end-to-end), 147 567 rows from `asset_prices_v3`; profit family real and nonzero (profit 355.6M / loss 295.3M / ratio 602.7 for 2016). Stale 07-07 rows shadowed via `argMax(computed_at)`.
+
+**Fossil re-analysis (guard vs served, 2016, 537 metrics):** 350 reproduce (<1e-9), 89 float-noise (<1e-4), 81 moderate (1e-4..1e-2), **17 REAL (>1%)** — but the composition CHANGED vs §10, cleanly splitting into two causes:
+- **Genesis-valuation defect (HEAD wrong, fix-first):** `network_profit_loss` 559.6M vs 281.1M (rel .498) + its change_1d/7d/30d (rel 1.2–2.0, sign flips); `transaction_volume_profit` 355.6M vs 327.0M (**+8.0%**) and `_ratio` (+10.4%). **`transaction_volume_loss` REPRODUCES (7e-5)** — the smoking-gun confirmation: an acq-price-$0 cohort can book profit but never loss, so only the profit side inflates. (§10's "∞ severe" tier for this family was entirely the ordering artifact.)
+- **True methodology fossils (HEAD = current intended methodology, bless):** `stack_mean_age_dollar_days_90d/180d/365d/2y/3y/5y` (rel .11–.44), `stack_realized_cap_usd_delta_7d/30d`, `mean_realized_price_usd_7d`, `mvrv_usd_7d` (~1–4%). Same 2022-03 acq-price-grid story as §10/XRP. (Realized-cap/dollar-days are NOT genesis-affected: a $0×amount contribution equals a NULL-skipped one.)
+- `active_holders_distribution_amount_delta_1e8` "rel 1.0" is dust (-1.9e-9 vs 0), not a divergence.
+
+**Baseline blessed:** re-recorded all 537 from `*_guard`, then **held out 6** (`network_profit_loss` +3 changes, `transaction_volume_profit`, `_ratio`) pending the [`../2026-07-genesis-acquisition-price-valuation/`](../2026-07-genesis-acquisition-price-valuation/genesis-acquisition-price-valuation.md) fix → **531 asserted metrics**, provenance note in the JSON, self-check vs `*_guard` PASSES. Commit `bcd949bd` (metricsQA, pushed).
+
+**Remaining to go live:** review+merge #2274 + #1714 (all merge blockers cleared); after the genesis fix lands: recompute → re-add the 6 held metrics. Then more chains (BTC).
