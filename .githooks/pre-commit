@@ -1,9 +1,26 @@
 #!/bin/sh
-# A commit that changes a task directory must also update its status line in
-# INDEX.md, so the index never goes stale.
+# Repo invariants (conventions: CLAUDE.md):
+#  1. every new file lives in a YYYY-MM-<kebab-slug>/ task directory
+#     (repo-level files INDEX.md, CLAUDE.md, README.md and .githooks/ excepted);
+#  2. a commit that changes a task directory must also update the task's
+#     status line in INDEX.md, so the index never goes stale.
+
+added=$(git diff --cached --name-only --diff-filter=AR)
+stray=$(echo "$added" \
+  | grep -vE '^(INDEX\.md|CLAUDE\.md|README\.md|\.githooks/)' \
+  | grep -vE '^20[0-9]{2}-(0[1-9]|1[0-2])-[a-z0-9]+(-[a-z0-9]+)*/.')
+if [ -n "$stray" ]; then
+  echo "pre-commit: new files outside a YYYY-MM-<kebab-slug>/ task directory:" >&2
+  echo "$stray" | sed 's/^/  /' >&2
+  echo "Move them into a task directory (conventions: CLAUDE.md)." >&2
+  exit 1
+fi
+
 staged=$(git diff --cached --name-only)
-echo "$staged" | grep -q '^20[0-9][0-9]-' || exit 0
-echo "$staged" | grep -qx 'INDEX.md' && exit 0
-echo "pre-commit: this commit touches a task directory but not INDEX.md." >&2
-echo "Update the task's status line in INDEX.md and 'git add INDEX.md', then retry." >&2
-exit 1
+if echo "$staged" | grep -q '^20[0-9][0-9]-' \
+   && ! echo "$staged" | grep -qx 'INDEX.md'; then
+  echo "pre-commit: this commit touches a task directory but not INDEX.md." >&2
+  echo "Update the task's status line in INDEX.md and 'git add INDEX.md', then retry." >&2
+  exit 1
+fi
+exit 0
