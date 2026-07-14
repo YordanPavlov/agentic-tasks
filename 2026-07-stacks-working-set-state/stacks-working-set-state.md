@@ -200,6 +200,65 @@ Plausibly 2–3× on live-state bytes combined; none change the asymptote.
 5. Output equivalence validation reuses the XRP methodology
    (`compare_xrp_experimental.py`, L1 + intraday + daily L2).
 
+## Step 1 bootstrap — state-composition measurement
+
+Everything a fresh session needs to start the measurement without re-deriving
+it from the code.
+
+**Target:** ETH first — the dormant-tail premise is only measured on XRP, and
+ETH is the big prod state. XRP second as a cross-check (validated baseline +
+`compare_xrp_experimental.py` harness exist in the
+[bucketing task](../2026-06-odt-bucketing-xrp/)).
+
+**Tooling:** Flink state-processor API (`flink-state-processor-api` is
+already in `build.sbt`). It reads **canonical savepoints**, not incremental
+RocksDB checkpoints — if the running jobs only have checkpoints, an operator
+must trigger a savepoint first.
+
+**Where the state lives (verified against code, 2026-07-14):**
+
+| job | stacks operator uid | keyBy type |
+|---|---|---|
+| `ETHAccountChanges` (window) | `create-stack-changes-<executionName>` (`ETHAccountChanges.scala:70`) | `Int` — `(contract.hashCode + address.hashCode) % stateParallelismLimit` (`:66`) |
+| `ETHAccountChangesExact` (flatmap) | `create-stack-changes-<executionName>` (`ETHAccountChangesExact.scala:75`) | contract (`String`) (`:72`) |
+| `XRPStacks` (window) | `calculate-transaction-stack-changes` (`XRPStacks.scala:46`) | `Int` (`:41`) |
+
+State descriptors to declare in the reader — reuse the existing ones from
+`ComputeAccountStackChangesTimeWindow`:
+
+- `storeDescriptor` — MapState `account-change-store`:
+  `Array[Byte]` (KeyGenerator ASCII key + batch index) → `StorageSegments`
+  (Avro, `segment.avsc`: per segment `nonce` long, `ots` long, `value` bytes).
+- `sizeNonceDescriptor` — MapState `nonce`:
+  `Array[Byte]` → `(java.lang.Long, java.lang.Long)` (Scala tuple → Kryo).
+- Exact variant additionally: `progress-state`
+  (ValueState[`CurrentBlockInfoStorage`]).
+
+**What to emit per address** (then aggregate):
+
+- KV counts and serialized bytes, split **sizeNonce vs segment batches**, and
+  split **key bytes vs value bytes** (re-serialize values with the Avro
+  writer to measure; keys are the map keys as stored).
+- Segment count per address (from the size in the sizeNonce pair).
+- **Dormancy cohort:** state holds no last-touch timestamp; use the **top
+  segment's `ots`** (= last inflow) as the activity proxy, optionally
+  cross-checked by joining sampled addresses against last-transfer times in
+  ClickHouse.
+
+**Outputs wanted:** totals + histograms per cohort (TSV in this directory,
+summary table appended to this doc). This prices constant-factor levers 1–3
+(share of bytes in duplicated keys / sizeNonce KVs / stored nonces) and
+tests the dormant-tail premise on ETH.
+
+**Operator input needed at session start:**
+
+- Savepoint availability: S3 path + whether the container can reach it
+  (`ALLOW_PROD_*` opt-in; S3 credentials). Alternative if the savepoint is
+  not reachable locally: package the reader as a Flink batch job and run it
+  on the cluster, shipping back only the aggregates.
+- Which `executionName`s / contract scope to measure for ETH (per-token jobs
+  vs ETH itself).
+
 ## Session log
 
 ### 2026-07-14 — investigation distilled into this task
@@ -209,4 +268,6 @@ stacks concept + bucketing ADR + handler/state code, established Insights
 1–8 above, corrected the "RocksDB already tiers to S3" assumption, and
 converged on ForSt + per-address async restructure as the direction, with
 ClickHouse rebuild demoted to bootstrap/DR. Constant-factor levers parked for
-later evaluation. No code written yet.
+later evaluation. No code written yet. Step 1 bootstrap section added
+(operator uids, descriptors, measurement spec, access prerequisites) so the
+measurement can start in a fresh session.
