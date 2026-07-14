@@ -682,3 +682,21 @@ Analytical: acquisition price is sampled at `toStartOfFiveMinute(odt)`, which is
 dt-aggregation nets coins acquired AND spent within one 5-min bucket to zero in the (B,B) seam cell. Measured on prod seam: **5.0% of consumed volume 2024-06, 15.2% 2019-06**. Unaffected: P/L family (those legs classify as neither profit nor loss in unbatched too — contributes 0), age/dollar-weighted metrics (weight ≤5min ≈ 0). Affected: **entire `stack_circulation_*` family (uniform absolute loss across all windows — any consumption with age<window counts), `spent_coins_age_band_0d_to_1d`** — a material definition change of its own (would fail the same standard as carve-out 1). Note: gross-per-sign seam rows can't fix it in the current schema (no sign in seam ORDER BY key → Replacing collision).
 
 **Options:** (a) product blesses it as "sub-5-min self-churn removal" (path-payments/AMM hops); (b) seam schema change to carry gross flows; (c) **variant D: 5-min odt, dt UNBATCHED** — fixes carve-out 1 identically, zero flow-metric impact, keeps the full 2.85× Flink-state win, but forfeits the CH storage win (stacks/seam rows ≈ unbatched). Decision needed on which axis (state vs storage vs definitions) dominates.
+
+### 18.4 Variant D evaluated (5-min odt, dt untouched) — measured worth-it verdict (2026-07-15)
+
+**It's a config flip, not a project:** ADR knob `Config.stacksOdtBucketMs` = 300000 (vs current 3600000); `dt` is never bucketed by design; merge invariant is bucket-size-agnostic; per-deploy (per-chain) choice.
+
+**Metric integrity — effectively exact:** `stack_age_consumed` 2019 sim: p50 relerr **2.7e-6** (hourly: 4.1e-5), p99 5e-5, integral 0.999999. P/L family bit-exact (§18.1), no flow netting (dt untouched), ADR's ~2% 1d-window bias → ~0.17%. All §17 carve-out-1 damage gone; only genesis (orthogonal) remains.
+
+**Space (measured):**
+
+| vs unbatched v8 | hourly (current branch) | variant D (5-min odt) | D retains |
+|---|---|---|---|
+| Flink LIVE segments (1% addr sample, dt<2025-06) | −48% (raw/1.91) | **−27%** (raw/1.36) | 55% of win |
+| stacks rows (2024-06) | −33% | **−31%** | 93% |
+| seam cells (2024-06) | −51% | **−35%** | 69% |
+
+Live-segment absolutes (×100 fleet est.): raw ~130M, 5-min ~95M, hourly ~68M; live addresses ~6.5M; live segments/address: 20.0 raw → 14.7 (5-min) → 10.5 (hourly). NOTE: live ratios are much smaller than the all-time segment-universe ratios (§18.2: 2.85×/5.53×) — live state is dominated by dormant addresses whose acquisitions are temporally spread (bucketing can't merge them); the all-time universe overweights churny consumed segments. The §15 RocksDB live-data-size gauges remain the byte-level calibration. Futures not re-measured (day-granularity preserved → expected ≈ hourly's).
+
+**Verdict:** vs unbatched, variant D still wins meaningfully on every axis at ~zero metric cost; vs hourly it trades ~half the live-state win and a third of the seam win for the complete elimination of carve-out 1 (and every other bucketing deviation). Since the knob is per-chain, hourly can remain the setting for state-desperate chains (bot/MEV L2s per ADR) where holding the P/L family is acceptable.
