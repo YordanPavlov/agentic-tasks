@@ -25,6 +25,20 @@ Syndromes this commonly produces:
   flexors, which work overtime trying to stabilize what the bones aren't
   doing efficiently
 
+## Case notes (2026-07-14)
+
+The fundamental complaint is a **knee issue**, not the feet: no remembered
+incident, and multiple MRI scans have confirmed no structural damage. The
+doctors' working hypothesis is **muscle imbalance pulling the kneecap
+slightly off track**. Foot pains alongside this led to considering the
+arches; orthopedists have confirmed the arch is a bit fallen.
+
+Additional observation: the **calf on the problematic leg is chronically
+overworked and tight**.
+
+Stop signal: sharp pain during any exercise (vs. working-muscle burn) — stop
+and bring it to the doctor.
+
 ## Daily foot routine (~5 min, ideally barefoot)
 
 The part most people skip because it feels too small to matter — it's
@@ -77,14 +91,6 @@ to the next.
    less than forward lunges while working the same range of motion that
    troubles patellofemoral issues. The front knee should track over the
    second toe, not collapse inward (check in a mirror or by feel).
-5. **Eccentric single-leg calf raise** — 8 reps/side, barefoot or in socks.
-   Stand on a step with heels hanging off, rise on both feet, shift weight to
-   one foot, lower slowly over 3 s. The slow eccentric builds Achilles tendon
-   resilience — essential prep for gradually adopting lower-drop shoes.
-6. **Side plank** — 20–30 s/side, building to 45–60 s over weeks. Knees-down
-   version is fine initially. Hugely valuable for glute-medius transfer to
-   standing/walking and for the trunk stability that prevents the
-   pelvis-drop pattern.
 
 ## Progression
 
