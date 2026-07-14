@@ -6,7 +6,13 @@
   dedicated ClickHouse instance — MVs, native primitives, glue code — instead
   of the Flink job. Latency budget: **up to 5 minutes** accepted; a hot table
   for fresh data can tighten the inner loop.
-- **Status:** evaluated on paper (this doc); spike not started.
+- **Status:** spike iteration 1 **PASSED** (2026-07-14): Python fold replica
+  validated byte-exact vs the Flink baseline on a 10-address ETH focus group
+  (1338/1338 rows, genesis→2016-03), committed as `d1ce81a9` on branch
+  `clickhouseStacks` in etherbi-flink (`clickhouse-stacks/`, incl.
+  `doc/architecture.md`). Next: iteration 2 = full-chain shadow against
+  **prod** (Yordan: prod eth_stacks should be clean; move there for the next
+  comparison). See "Fresh-session bootstrap" below.
 - **Verdict of the initial evaluation:** viable — the fold is expressible,
   semantics can be kept exactly (this is *not* the rejected dt-bucketing),
   and state maintenance can be largely declarative. Real risks are merge
@@ -122,61 +128,184 @@ models with two small fold functions.
 5. **Decision point vs architectures A/B** in the sibling task — criteria:
    state footprint, ops complexity, latency, team contribution surface.
 
-## Fresh-session bootstrap
+## Fresh-session bootstrap (updated after iteration 1, 2026-07-14)
 
-What a new session needs beyond this doc.
+Everything a brand-new session needs. The XRP-oriented bootstrap this section
+used to hold is obsolete — scope changed to **ETH** and iteration 1 is done.
 
-**Ground truth to read first** (all in `~/santiment/src/etherbi-flink`):
+**Read first, in this order:**
 
-- Fold semantics: `src/main/scala/net/santiment/job/helpers/HandlerOneAccountChange.scala`
-  (push/pop/remainder/liability/odt-bucket-merge — the function the UDF must
-  replicate) and `docs/concepts/stacks.md` +
-  `docs/decisions/configurable-odt-bucketing.md` (invariants, closed doors).
-- **Golden test vectors**:
-  `src/test/scala/net/santiment/job/helpers/HandlerOneAccountChangeTest.scala`
-  and `src/test/scala/net/santiment/job/ComputeAccountStackChangesTimeWindowTest.scala`
-  — port these cases to the UDF test suite before writing the UDF.
-- Output row shape: `AccountModelChange` in
-  `src/main/scala/net/santiment/package.scala`; raw CH landing table is the
-  per-chain `*_stacks` table (schema via the clickhouse skill).
+1. `~/santiment/src/etherbi-flink/clickhouse-stacks/doc/architecture.md` —
+   the authoritative description of what exists: replicated Flink semantics
+   (filters → dedup → compression → fold, step by step with Scala source
+   pointers), table design (`ver = block*2 + deleted`, state ≡ output
+   re-keyed), validation methodology, stage-vs-prod caveat, known
+   limitations. Written for exactly this bootstrap purpose.
+2. This journal's session log (below) for the discoveries and their evidence.
 
-**Environment facts (verified in this container, 2026-07-14):**
+**Where the work lives:**
 
-- `clickhouse` / `clickhouse-local` **26.6.1** binaries are installed;
-  `arrayFold` confirmed working. No docker. So the spike runs against a
-  **local clickhouse server** started in the container (needed over
-  `clickhouse-local` for MVs + executable UDFs, which require server config:
-  `user_defined_executable_functions` XML + scripts dir).
-- Prod ClickHouse is **read-only** via the wrapper (santiment-clickhouse-query
-  skill): use it for schemas, the XRP baseline (`xrp_stacks`), and pulling
-  sample input slices; never write there.
+- Repo `etherbi-flink`, branch **`clickhouseStacks`** (created by Yordan off
+  master), directory `clickhouse-stacks/`. Commit `d1ce81a9`, **not pushed**
+  as of session end — check `git log origin/clickhouseStacks` before assuming
+  remote state.
+- Code: `stack_fold.py` (pure fold; `python3 test_stack_fold.py` must pass
+  14/14 before any change lands), `focus_run.py` (iteration-1 driver;
+  `--skip-insert` reruns fold+compare without writing), `chq.sh` (retrying
+  clickhouse-client wrapper — use it, the stage LB resets connections
+  constantly), `kafka_block_probe.py` (forensic only).
+- Stage test tables: 8 tables `*_test_ypavlov*` — full ledger + cleanup DDL
+  in `clickhouse-stacks/TABLES.md`. They contain the iteration-1 results
+  (1338 output rows, 10 addresses). Constant:
+  `assetRefId = cityHash64('ETH_ETH') = 14259145649589866191`.
 
-**Input/baseline data (to resolve at session start):**
+**Environment facts (verified in this container 2026-07-14):**
 
-- Confirm the XRP raw-input table in CH and that it carries the ordering
-  fields the fold needs (block, tx position, internal position — the Flink
-  job's primary-key pair). If only Kafka has them, pull a bounded slice via
-  the santiment-kafka-source-search skill into local CH.
-- Baseline for diffing: prod `xrp_stacks` + the comparison methodology in
-  `../2026-06-odt-bucketing-xrp/compare_xrp_experimental.py`.
+- Stage CH `clickhouse.stage.san:30900` is **writable as user `default`**
+  (the readonly wrapper only intercepts `*.production.san`); DDL must be
+  `ON CLUSTER default_cluster` + Distributed wrappers (LB rotates across
+  clickhouse-0/1/2). Python: `clickhouse-driver` is installed and is what
+  `focus_run.py` uses; `kafka-python`+lz4/snappy/zstd installed via
+  `pip --break-system-packages` (no /opt/kafka CLI in the container).
+- Prod CH: read-only via wrapper. The sandbox permission classifier **blocks
+  prod queries unless Yordan explicitly directed the prod read in his own
+  words** — get that go-ahead before iteration 2 work (he has already said
+  "we would move to prod for data comparison on next step", but each session
+  should confirm scope).
 
-**Decisions needed from Yordan at session start:**
+**Iteration 2 plan (agreed direction):**
 
-1. Where the code lives (new repo vs `clickhouse-tables` vs task-dir scripts
-   until it stabilizes).
-2. Whether a writable dev CH server exists to use instead of / after the
-   in-container local server (needed anyway for the full-history XRP shadow —
-   local disk in the container won't hold full XRP history).
-3. Scope confirmation: XRP first, odt bucketing ON (5-min) in the fold from
-   day one, or replicate unbucketed behavior first and add bucketing second
-   (recommended: unbucketed first — matches the golden tests, then flip the
-   knob and diff both, mirroring the Flink validation sequence).
+1. Sanity-check prod baseline first: prod `eth_stacks` block 55260 must show
+   the block reward surviving (mining_block rows + 5 ETH in the miner
+   inflow) — prod transfers are post-fix (verified), and Yordan expects prod
+   stacks to be clean; this confirms it.
+2. Full-chain shadow: read **prod** `eth_transfers` (post-#227 → positions
+   unique → `SELECT DISTINCT` dedup is fully deterministic, no oracle, no
+   clean-address restriction), fold from genesis, write to the stage
+   `_test_ypavlov` tables, compare against **prod** `eth_stacks`.
+3. Compare via per-block digests (count + xor/sum of `cityHash64` over
+   (address, sign, nonce, odt, amount, coalesce(txID,''))) on both sides,
+   then drill only into mismatching blocks — avoids giant joins.
+4. Needed build-out for that scale (see architecture.md "Known limitations"):
+   micro-batch driver with CH state read-back + resume (dt-window batches —
+   blocks never span a dt second; note `eth_transfers` sort key
+   `(from, type, to, dt, ...)` means dt-window reads scan month partitions),
+   driver-side state cache, lazy top-K stack reads for whales
+   (`0x0000…` gains one zero-value EOB segment per block; `mining_block` is
+   a liability chain). Start genesis→2016-03 on prod (6.4M rows there too),
+   then extend; server-side fold (executable UDF / arrayFold) is a later
+   optimization, not needed for validation.
 
-**Suggested starting directory:** `~/santiment/src/etherbi-flink` (ground
-truth + tests at hand); the global instructions make any session scan
-`agentic-tasks/INDEX.md` and find this doc.
+**Standing rules:** new stage tables must carry `test` + `ypavlov` in the
+name and be recorded in `TABLES.md`; stage data has anomalies (duplicates,
+staleness) — treat surprises as possible data artifacts before suspecting
+the fold; never write to prod.
 
 ## Session log
+
+### 2026-07-14 (session 2) — spike started: ETH on stage CH; Flink-dedup nondeterminism discovered
+
+Yordan's decisions: code in `etherbi-flink/clickhouse-stacks/` (new repo later);
+writable cluster = **stage** (`clickhouse.stage.san:30900`, user `default`; the
+readonly wrapper only guards `*.production.san`); scope switched **XRP → ETH**
+(consume `eth_transfers`, diff vs `eth_stacks`). Test tables must carry
+`test` + `ypavlov` in the name; ledger in `clickhouse-stacks/TABLES.md`.
+
+**Recon findings (all verified against stage):**
+
+- `eth_stacks` stage is **stale** (max dt 2026-05-21); eth_transfers is live.
+  Inflows are **unbucketed** (`odt == dt` for fresh pushes) → replicate
+  `stacksOdtBucketMs = 0`.
+- Amounts land in CH as **raw wei parsed into Float64** (Jackson writes the
+  BigInt verbatim; `eth_stacks_mv_v2` maps ts/1000→dt, ots/1000→odt,
+  `assetRefId = cityHash64('ETH_'||contractAddress)`).
+- Input mapping (ETHTransfersSource → ETHAccountChanges): pre-dedup filter
+  (self-transfers dropped unless EOB w/ block>0||ts>0), **dedup keep-first per
+  (block, txPos, intTxPos)** in *Kafka arrival order*, post-filter (APPROVE,
+  block==0&&ts==0), flatMap → (from,−amt),(to,+amt), window = 1 block,
+  per-(contract,address) sort by (txPos,intPos) + same-sign-run compression
+  (merged row keeps **last** run element's txID), then the stack fold.
+- **Flink ETH baseline is nondeterministic.** Block reward is always at
+  position (0,0), colliding with tx0's row in every block with ≥1 tx; second
+  uncle sits at (0,1). The topic (`eth_transfers_v3`, old stage Kafka,
+  8 partitions) spreads one block's records across partitions (EOB p4, block
+  reward p5, uncle p6 for block 45429), so keep-first is a network race.
+  Measured on Aug-2015: uncle-vs-reward kept/dropped = 4937/3790; tx-vs-reward
+  = 12985/16229 (~coin-flip). ⇒ `eth_stacks` cannot be reproduced byte-exactly
+  by any deterministic reimplementation — nor by re-running Flink. Validation
+  therefore uses an **oracle-guided dedup**: read per-block winners back from
+  `eth_stacks` (`mining_block` / `mining_uncle` row presence; liability deltas
+  for the 3.5k two-uncle blocks), taint+exclude the unresolvable remainder.
+- All content-differing dedup collisions involve reward rows (count of
+  non-reward collisions pre-2016-03: **0**); genesis (block 0) all 8893
+  allocations share (0,0) — exactly one survived in the baseline
+  (`0x000d836201…`, lowest address). Stage `eth_transfers` also holds literal
+  duplicate rows (identical content) — collapse before processing.
+- Volume pre-2016-03: 6.4M transfer rows / 1.08M blocks — Python-fold friendly.
+- Env notes: stage LB rotates brokers (clickhouse-0/2) and resets connections
+  frequently → retry wrapper `chq.sh`; test tables must be ON CLUSTER
+  `default_cluster` (+ Distributed). No /opt/kafka CLI in container —
+  installed `kafka-python` (+lz4/snappy/zstd) instead; probe:
+  `clickhouse-stacks/kafka_block_probe.py`.
+
+**Progress (session 2, checkpoint at user brief):**
+
+1. `clickhouse-stacks/stack_fold.py` — exact-int Python replica of
+   `HandlerOneAccountChange` + `groupAndCompress` (incl. optional odt
+   bucketing); `test_stack_fold.py` ports the Scala golden tests + edge cases
+   (liability chain, remainder, zero-amount EOB, sign-alternation compression)
+   — **14/14 pass**.
+2. Stage test tables created (see `clickhouse-stacks/TABLES.md` for the
+   cleanup ledger): output / per-segment state / meta / batches, each as
+   `*_shard` + Distributed wrapper, all named `*_test_ypavlov*`.
+   Key design: state rows are exactly the output rows re-keyed
+   ((contract,address,nonce) → value String exact, deleted flag,
+   ver=block*2+deleted) — per-segment version of Insight 2; meta keeps
+   (lastNonce, stackSize).
+3. **Focus-group validation PASSED (Yordan's cut for iteration 1):** 10 "clean"
+   addresses (never party to a dedup race: no reward records, never from/to at
+   positions (0,0)/(0,1); selected by activity from genesis→2016-03), full
+   history folded from genesis by `focus_run.py` → **1338/1338 output rows
+   byte-exact** vs `eth_stacks` (sign, nonce, dt, odt, Float64 amount, txID all
+   equal; zero extra/missing rows either side). Path coverage: 575 fresh
+   pushes, 644 pops, 119 remainder re-pushes, 666 blocks; liability path not
+   reachable for clean addresses (covered by unit tests). Results also written
+   to the `_test_ypavlov` output/state/meta tables (state row = output row
+   re-keyed, ver = block*2+deleted — worked as designed).
+4. Nondeterminism evidence packaged as two CH queries (collision listing +
+   coin-flip classifier); day 2015-08-08 alone: 703 blocks lost the block
+   reward, 594 kept it.
+   **RESOLVED — stale stage data, not a live bug.** Yordan suspected the
+   exporter had already fixed it; confirmed in `san-chain-exporter`:
+   - PR #212 (`ff4a1d0`, 2024-12-10) introduced
+     `assignInternalTransactionPosition` (key incl. from/to — rewards still
+     collided);
+   - PR #226 (`9889234`, 2025-04-25) full ordering within a tx (key
+     block-txHash — rewards still their own group at intPos 0);
+   - **PR #227 (`eea50b3`, 2025-05-14) is THE fix**: assignment key →
+     `block-txPos`, chosen explicitly "based on what Flink would deduplicate";
+     its unit test is literally mining_uncle vs a tx at the same position.
+   Verified on prod (read-only, block 55260): reward (0,0), fee (0,1), all
+   positions unique, no duplicate rows → prod-shaped input has NO dedup
+   ambiguity. Stage's `eth_transfers_v3` topic / `eth_transfers` /
+   `eth_stacks` predate the fix and were never wiped — the races I measured
+   are fossils of the pre-#227 exporter. No escalation needed.
+   Open question for Yordan: was prod `eth_stacks` recomputed from the
+   re-exported (post-#227) topic? If yes, a **full-chain byte-exact shadow
+   against prod** (read prod transfers+stacks read-only, write to stage test
+   tables) becomes possible with zero oracle — deterministic dedup by
+   construction. (Prod-read attempt for that check was blocked pending
+   explicit user direction.)
+5. Not yet written: full-chain micro-batch driver (dt-window batches, dict
+   state + CH read-through), digest-based compare (per-block count+xor-hash
+   triage → drilldown).
+6. **Session wrap-up:** work committed as `d1ce81a9` on Yordan's new branch
+   `clickhouseStacks` (not pushed); `doc/architecture.md` added on his
+   request as the reference for humans/agents and for his review of the
+   initial code. Yordan: prod `eth_stacks` should be clean → **iteration 2 =
+   full-chain comparison against prod** (deterministic post-#227 input makes
+   the oracle idea unnecessary there; it stays shelved for stage-only work).
+   Bootstrap section above rewritten for the new state.
 
 ### 2026-07-14 — idea raised and evaluated on paper
 
