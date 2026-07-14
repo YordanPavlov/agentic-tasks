@@ -23,6 +23,12 @@
   [synergy](#insight-5-losing-groupandcompress-is-fine-because-of-bucketing).)
 - **Repo docs:** `etherbi-flink/docs/concepts/stacks.md`,
   `etherbi-flink/docs/decisions/configurable-odt-bucketing.md`.
+- **Architecture C (added 2026-07-14):** compute stacks natively in
+  ClickHouse (micro-batch SQL + UDF fold, ≤5-min latency budget) — spun out
+  to [2026-07-stacks-in-clickhouse](../2026-07-stacks-in-clickhouse/stacks-in-clickhouse.md).
+  Insight 2 below is a load-bearing enabler there; the step-1 measurement
+  feeds both tasks. The A-vs-B-vs-C decision point lives in that task's spike
+  plan.
 
 ## Problem statement
 
