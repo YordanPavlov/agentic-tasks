@@ -654,3 +654,31 @@ Baseline design adopted: **pure-age family → prod stored directly** (bit-exact
 **Escalation bundle additions (prod defects, exp correct side in each):** windowed dollar-age family garbage (impossible values, all history); `daily_marketcap_usd` zero-days 2013–14 → MVRV/nvt contamination pre-2015; the stale-composite pattern (composites not recomputed when inputs are re-backfilled) is systemic — detectable as `composite.computed_at < input.computed_at`.
 
 **Next:** (1) team decision on tx-volume-P/L under bucketing (present §17.3 numbers); (2) fold verdicts into the ADR + product note; (3) escalation write-up; (4) Flink savepoint/RocksDB gauge readout (§15, still pending); (5) next-chain rollout unblocked for everything except the carve-outs.
+
+## 18. Evaluation — proposed 5-min/5-min batch redesign (fix for §17 carve-out 1) (2026-07-15)
+
+Proposal (operator): drop hourly odt cohorts; use **5-min odt cohorts AND 5-min-aggregated dt** (Flink becomes a 5-min micro-batch job; only 5-min-aligned (dt, odt) pairs leave the stacks).
+
+### 18.1 Carve-out 1: FIXED — exactly, not approximately
+
+Analytical: acquisition price is sampled at `toStartOfFiveMinute(odt)`, which is invariant under 5-min odt bucketing → consumption-leg classification bit-equal to unbatched; addition legs get odt-bucket == dt-bucket → acq ≡ current price → never classify (invariant restored). Empirical (2019 full-year sim on prod seam, HEAD formula): **sim-5min/5min profit 71.646B / loss 93.293B = EXACTLY the nb baseline**, all-legs ≡ cons-only again; hourly control sim reproduces the damaged exp numbers (loss 19.217B = exp replica to 3 decimals — also validates sim methodology). `stack_price_consumed` 0.1–0.25% and `supply_in_profit` 0.3% deviations collapse to ≈exact too (same acq-price-sampling root). All age errors go ≤1h → ≤5min. Flink-internal LIFO merge not captured by sim, but Layer-1 proved seam-equivalence for hourly merging; 5-min is strictly finer.
+
+### 18.2 Space evaluation (measured on prod v8 / exp, XRP)
+
+**ClickHouse storage — proposed design BEATS hourly** (dt is the high-cardinality axis; ~75 XRP ledgers per 5-min):
+
+| rows, 2024-06 sample | stacks | seam (162) |
+|---|---|---|
+| unbatched v8 | 63.9M | 19.8M |
+| hourly design (sim / actual exp) | 42.9M / 45.9M | 9.71M / 9.70M |
+| 5min/5min (sign kept / sign-netted) | **15.0M / 10.0M (−77/−84% vs v8)** | **2.6M (−87% vs v8)** |
+
+**Flink RocksDB state — segment multiplier ~2×, not 12×** (odt-driven only; dt batching doesn't touch state): distinct (address, odt-bucket): raw 1.005B / 5-min 352M / hourly 182M all-time → 5-min = **1.94× hourly** (2.13× on 2024 alone), still **2.85× below unbatched** (hourly was 5.53×). nonce CF unchanged; 5-min output buffer negligible. Calibrate against §15 RocksDB gauges when read.
+
+**Latency:** micro-batch adds ≤5min output delay — matches the intraday 5-min cadence; frontier consumers see one-bucket lag.
+
+### 18.3 ⚠ NEW COST — same-bucket netting hits the circulation family
+
+dt-aggregation nets coins acquired AND spent within one 5-min bucket to zero in the (B,B) seam cell. Measured on prod seam: **5.0% of consumed volume 2024-06, 15.2% 2019-06**. Unaffected: P/L family (those legs classify as neither profit nor loss in unbatched too — contributes 0), age/dollar-weighted metrics (weight ≤5min ≈ 0). Affected: **entire `stack_circulation_*` family (uniform absolute loss across all windows — any consumption with age<window counts), `spent_coins_age_band_0d_to_1d`** — a material definition change of its own (would fail the same standard as carve-out 1). Note: gross-per-sign seam rows can't fix it in the current schema (no sign in seam ORDER BY key → Replacing collision).
+
+**Options:** (a) product blesses it as "sub-5-min self-churn removal" (path-payments/AMM hops); (b) seam schema change to carry gross flows; (c) **variant D: 5-min odt, dt UNBATCHED** — fixes carve-out 1 identically, zero flow-metric impact, keeps the full 2.85× Flink-state win, but forfeits the CH storage win (stacks/seam rows ≈ unbatched). Decision needed on which axis (state vs storage vs definitions) dominates.
