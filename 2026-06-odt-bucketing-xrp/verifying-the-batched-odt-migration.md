@@ -700,3 +700,16 @@ dt-aggregation nets coins acquired AND spent within one 5-min bucket to zero in 
 Live-segment absolutes (×100 fleet est.): raw ~130M, 5-min ~95M, hourly ~68M; live addresses ~6.5M; live segments/address: 20.0 raw → 14.7 (5-min) → 10.5 (hourly). NOTE: live ratios are much smaller than the all-time segment-universe ratios (§18.2: 2.85×/5.53×) — live state is dominated by dormant addresses whose acquisitions are temporally spread (bucketing can't merge them); the all-time universe overweights churny consumed segments. The §15 RocksDB live-data-size gauges remain the byte-level calibration. Futures not re-measured (day-granularity preserved → expected ≈ hourly's).
 
 **Verdict:** vs unbatched, variant D still wins meaningfully on every axis at ~zero metric cost; vs hourly it trades ~half the live-state win and a third of the seam win for the complete elimination of carve-out 1 (and every other bucketing deviation). Since the knob is per-chain, hourly can remain the setting for state-desperate chains (bot/MEV L2s per ADR) where holding the P/L family is acceptable.
+
+## 19. Wrap-up — investigation closed; direction changed to 5-min odt (2026-07-15)
+
+**Where this landed.** The hourly-bucket validation (§9–§17) passed everywhere except one real casualty: hourly odt **practically throws away the price-classification metric family** (`transaction_volume_profit/loss/_ratio`: −80% of classified volume; consumption-only fix still −26%; §17.3/§18.1). Since removing or materially redefining those metrics is off the table, the operator redirected to bucket-size alternatives (§18):
+
+- **5-min odt + 5-min dt (full micro-batch):** fixes P/L exactly and beats hourly on CH storage (−77%/−87% rows), BUT same-bucket netting deletes 5–15% of consumed volume from the whole circulation family → rejected (its own material definition change).
+- **CHOSEN DIRECTION — variant D: 5-min odt, dt untouched** (`stacksOdtBucketMs = 300000`, pure config flip): P/L bit-exact, worst age deviation ~3e-6, no flow loss — *every* bucketing deviation this validation found disappears. Cost vs hourly: live Flink segments −27% instead of −48% (vs unbatched), stacks rows −31% vs −33%, seam −35% vs −51%.
+
+**Findings recorded in two places:**
+1. This runbook (§17 fossils/baseline/daily-verdict; §18 redesign evaluation with all measurements).
+2. The ADR `etherbi-flink/docs/decisions/configurable-odt-bucketing.md` — amended 2026-07 (commit `6e7aa1a2`, branch `batchStacksOdt`): status line, hourly row in the Consequences table now warns it destroys the P/L classifiers, dt-bucketing added to Alternatives-rejected with the netting numbers, recommended landing changed hourly → 5-min, and a full "Validation findings (2026-07, XRP)" section with mechanism, measurements, and the live-segment-vs-all-time caveat.
+
+**Still open (unchanged):** genesis-valuation product call (carve-out 2 → task 2026-07-genesis-acquisition-price-valuation); prod-defect escalation bundle (§13 + §17.4: windowed dollar-age garbage, 2013–14 zero-marketcap days, stale-composite pattern); §15 RocksDB gauge readout (now doubly useful: calibrates the −27% live-segment estimate in bytes); re-run the XRP validation once the 5-min config lands (expectation: everything ≈exact; the existing table_qa locks + compare tooling apply directly).
