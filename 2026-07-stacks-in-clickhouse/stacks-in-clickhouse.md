@@ -122,6 +122,60 @@ models with two small fold functions.
 5. **Decision point vs architectures A/B** in the sibling task — criteria:
    state footprint, ops complexity, latency, team contribution surface.
 
+## Fresh-session bootstrap
+
+What a new session needs beyond this doc.
+
+**Ground truth to read first** (all in `~/santiment/src/etherbi-flink`):
+
+- Fold semantics: `src/main/scala/net/santiment/job/helpers/HandlerOneAccountChange.scala`
+  (push/pop/remainder/liability/odt-bucket-merge — the function the UDF must
+  replicate) and `docs/concepts/stacks.md` +
+  `docs/decisions/configurable-odt-bucketing.md` (invariants, closed doors).
+- **Golden test vectors**:
+  `src/test/scala/net/santiment/job/helpers/HandlerOneAccountChangeTest.scala`
+  and `src/test/scala/net/santiment/job/ComputeAccountStackChangesTimeWindowTest.scala`
+  — port these cases to the UDF test suite before writing the UDF.
+- Output row shape: `AccountModelChange` in
+  `src/main/scala/net/santiment/package.scala`; raw CH landing table is the
+  per-chain `*_stacks` table (schema via the clickhouse skill).
+
+**Environment facts (verified in this container, 2026-07-14):**
+
+- `clickhouse` / `clickhouse-local` **26.6.1** binaries are installed;
+  `arrayFold` confirmed working. No docker. So the spike runs against a
+  **local clickhouse server** started in the container (needed over
+  `clickhouse-local` for MVs + executable UDFs, which require server config:
+  `user_defined_executable_functions` XML + scripts dir).
+- Prod ClickHouse is **read-only** via the wrapper (santiment-clickhouse-query
+  skill): use it for schemas, the XRP baseline (`xrp_stacks`), and pulling
+  sample input slices; never write there.
+
+**Input/baseline data (to resolve at session start):**
+
+- Confirm the XRP raw-input table in CH and that it carries the ordering
+  fields the fold needs (block, tx position, internal position — the Flink
+  job's primary-key pair). If only Kafka has them, pull a bounded slice via
+  the santiment-kafka-source-search skill into local CH.
+- Baseline for diffing: prod `xrp_stacks` + the comparison methodology in
+  `../2026-06-odt-bucketing-xrp/compare_xrp_experimental.py`.
+
+**Decisions needed from Yordan at session start:**
+
+1. Where the code lives (new repo vs `clickhouse-tables` vs task-dir scripts
+   until it stabilizes).
+2. Whether a writable dev CH server exists to use instead of / after the
+   in-container local server (needed anyway for the full-history XRP shadow —
+   local disk in the container won't hold full XRP history).
+3. Scope confirmation: XRP first, odt bucketing ON (5-min) in the fold from
+   day one, or replicate unbucketed behavior first and add bucketing second
+   (recommended: unbucketed first — matches the golden tests, then flip the
+   knob and diff both, mirroring the Flink validation sequence).
+
+**Suggested starting directory:** `~/santiment/src/etherbi-flink` (ground
+truth + tests at hand); the global instructions make any session scan
+`agentic-tasks/INDEX.md` and find this doc.
+
 ## Session log
 
 ### 2026-07-14 — idea raised and evaluated on paper
