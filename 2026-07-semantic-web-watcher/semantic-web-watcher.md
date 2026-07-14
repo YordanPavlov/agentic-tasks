@@ -6,8 +6,11 @@ new developments of houses around Sofia — "комплекс от къщи"), j
 LLM instead of keyword matching. Runs daily via cron on the host PC, presents
 confirmed matches in the terminal on demand.
 
-**Status: design settled (decisions 1–14) after the 2026-07-14 buffered-pipeline
-session; repo created at `~/src/semantic-web-watcher`, no code yet. Next: M0.**
+**Status: M0 complete + most of M1/M2 built and tested (2026-07-14 coding
+session): 165 unit/plumbing tests green, both LLM eval suites (`pytest -m
+llm`) pass against the real `claude` backend. Next: set `BRAVE_API_KEY`,
+copy `interests.example.toml`, do the first real run (seed), add the
+cron/anacron entry.**
 
 ## Problem statement
 
@@ -279,3 +282,37 @@ generic web in favor of the leaf/hub split — a hub's change signal is new
 outbound links through seen-store set-difference, immune to cosmetic churn
 (content-hash triggers judged unworkably noisy). `page_type` added to the
 verdict schema. Amended decisions 6, 7, 8 and M0 accordingly. Next: M0.
+
+### 2026-07-14 — coding session #1 (Claude Code): M0 + most of M1/M2
+
+Built the whole pipeline tests-first in `~/src/semantic-web-watcher`
+(3 commits, 165 tests + 2 LLM evals). Package `sww`, deps: httpx,
+trafilatura, charset-normalizer, typer (+pytest dev). Per module:
+canonicalize (32-case table; pagination/mobile/tracking folding,
+rel=canonical), db.py (NULL-pattern state machine, all predicates named
+fns, one-writer columns, singleton-cluster-per-match, GC eligibility),
+store.py (immutable content-addressed blobs, whitespace-normalized
+sha256), extract.py (trafilatura handles the cp1251 fixture natively,
+257KB→3.7KB), fetch.py (UA ladder w/ MockTransport 403→200, conditional
+GET, 5MB cap), judge.py (tolerant verdict-JSONL parser; SubscriptionBackend
+subprocess seam tested via stub `claude` on PATH incl. timeout/crash/env
+paths; batched triage prompt; deep-judge run dir with verdicts.jsonl as
+crash-resume ledger), sources/ (protocol + Brave w/ freshness widening +
+offset pagination), digest (read-only render, health header w/ STALE flag,
+give-up + shadow-audit sections), pipeline.py (stages as no-op-when-empty
+drains; seed mode; cross-URL dedup pass copies verdicts into the original's
+cluster), CLI `sww run|digest|ack` (run dir auto-created — caught by manual
+check, regression-tested). Beyond M0: Tier-1 URL-shape prefilter with
+shadow audit riding in the nightly triage batch (LLM 'yes' on a sampled
+reject reopens the row as `triaged_by='audit-override'` + digest line);
+LLM query expansion cached per intent hash, skipped during seed.
+**Verified against the real backend from inside the container** (`claude
+-p` works here): triage eval — both Google-Alerts misses rejected, both
+synthetic announcements passed, only golden-quarter passes triage
+(acceptable, recall-oriented); deep-judge eval — real agentic session
+judged syn-yes/syn-no/bg-mamma correctly with clean metadata
+(published_date, project, location extracted; forum thread rejected as
+"discussion, not announcement"). Not done: real crawl (no BRAVE_API_KEY in
+container), cron entry, Tier-2 embeddings, story clustering, domain
+priors, site: escalation. Open design nit for next session: eval INTENT
+string is duplicated in test_llm_eval.py rather than read from config.
