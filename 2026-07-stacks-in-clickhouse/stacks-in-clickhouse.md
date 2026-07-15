@@ -6,13 +6,22 @@
   dedicated ClickHouse instance — MVs, native primitives, glue code — instead
   of the Flink job. Latency budget: **up to 5 minutes** accepted; a hot table
   for fresh data can tighten the inner loop.
-- **Status:** spike iteration 1 **PASSED** (2026-07-14): Python fold replica
-  validated byte-exact vs the Flink baseline on a 10-address ETH focus group
-  (1338/1338 rows, genesis→2016-03), committed as `d1ce81a9` on branch
-  `clickhouseStacks` in etherbi-flink (`clickhouse-stacks/`, incl.
-  `doc/architecture.md`). Next: iteration 2 = full-chain shadow against
-  **prod** (Yordan: prod eth_stacks should be clean; move there for the next
-  comparison). See "Fresh-session bootstrap" below.
+- **Status: ON HOLD (Yordan, 2026-07-15).** After the load-estimation and
+  in-DB-fold sessions, Yordan is conflicted about the migration and wants to
+  **explore optimizing the Flink jobs instead** of deprecating them for now.
+  Do NOT proceed to iteration 2 without his explicit go-ahead. The spike is
+  in a clean, resumable state: iteration 1 PASSED (byte-exact focus-group
+  validation), both server-side fold options validated and benchmarked,
+  architecture + docs committed on branch `clickhouseStacks` (through
+  `38c1b3a8`). What was learned here transfers: the prod measurements
+  (per-5-min volumes, whale distributions, read-amplification lessons) and
+  the state-≡-output insight are useful for Flink optimization work too.
+- Pre-hold status: spike iteration 1 **PASSED** (2026-07-14): Python fold
+  replica validated byte-exact vs the Flink baseline on a 10-address ETH
+  focus group (1338/1338 rows, genesis→2016-03), committed as `d1ce81a9` on
+  branch `clickhouseStacks` in etherbi-flink (`clickhouse-stacks/`, incl.
+  `doc/architecture.md`). Iteration 2 (full-chain prod shadow) was designed
+  but not started.
 - **Verdict of the initial evaluation:** viable — the fold is expressible,
   semantics can be kept exactly (this is *not* the rejected dt-bucketing),
   and state maintenance can be largely declarative. Real risks are merge
@@ -202,6 +211,148 @@ staleness) — treat surprises as possible data artifacts before suspecting
 the fold; never write to prod.
 
 ## Session log
+
+### 2026-07-15 (session 3c) — task put ON HOLD
+
+Discussion continued through batch-input assembly (`executable-fold.md` now
+documents the six input sets and their maintenance) and the state tombstone
+lifecycle (merge collapse → safe optimize-then-delete cleanup → steady state
+= live segments, 360M vs 10.6B rows ever on prod ETH). Yordan committed the
+session's work himself in stages (`6043d89f`…`c6a91198`, final tombstone doc
+`38c1b3a8`). **Decision: Yordan is conflicted about the migration and will
+explore optimizing the Flink jobs instead for now** — see Status at top.
+
+### 2026-07-15 (session 3b) — in-DB fold validated; both server-side options measured
+
+Yordan's direction: data movement to a Python driver undermines the
+performance motivation — evaluate keeping the fold in-DB; other DBs may be
+considered (strong CH preference). Latest CH (26.7) installed locally in the
+container for prototyping (`scratchpad/clickhouse`); cluster is 25.3.
+
+**Option A — pure-SQL `arrayFold` fold: expressibility CONFIRMED.**
+`clickhouse-stacks/sql_fold_test.py` generates the whole
+`handle_account_change` as ONE arrayFold expression (~2.5KB SQL):
+LIFO pop = `arrayCumSum` + `arrayFirstIndex(cs >= rem)` (correct even for
+non-monotonic cumsum from liability segments — first-index ≡ the while-loop
+stop); liability/remainder unify as push of `-after` with ots 0 / last-popped.
+Exact wei via Int256 (big literals must be passed as quoted strings — the
+values() parser floats them otherwise). **305/305 fuzzed vectors byte-exact**
+vs `stack_fold.py` (incl. liability chains, zero segments, exact drain) on
+BOTH local 26.7 and stage 25.3. Throughput: 1M changes / 20k addrs / empty
+init = **2.2s** (≈460k changes/s), 1.39M output rows. Weakness: cost per
+change is **O(stack depth)** (immutable accumulator copied per step); CH
+lambdas have no `let`, but the `arrayMap(name -> body, [value])[1]` idiom
+emulates it — `lam_let()` binds rev/cs/k/after/base once, is 3–4× faster
+than the naive inline `lam()`, and passes the same 305 vectors. Depth
+scaling (200 changes, let variant): 16k → 0.26s, 100k → 2.5s, 500k → 15s.
+[CORRECTION: an earlier ">7min pathological at 100k" observation was a
+misread — the background bench's stdout was block-buffered, so an empty
+output file looked like a hang; re-measured properly it's linear.]
+Verdict: fine with lazy top-K state windows (whales need those anyway);
+wrong tool for folding a whale's full stack. Reading guide + annotated SQL:
+`clickhouse-stacks/doc/sql-fold.md`.
+
+**Option B — `executable()` table function (PREFERRED): works, whale-proof.**
+`clickhouse-stacks/fold_pipe.py` reuses `stack_fold.py` verbatim; CH streams
+`(addr, nonce, stack JSON, changes JSON)` per address through the script
+server-side (tested on local 26.7 via `user_scripts_path` config; needs a
+file + config deploy on our own cluster — fine, we control it). Same 1M-change
+benchmark: **identical 1,392,000 output rows as option A** (cross-validation),
+2.5s. Whale: **500k-deep stack + 2000 changes = 0.8s** incl. ~15MB JSON both
+ways. Python is the floor — a Rust rewrite of the ~100-line fold lifts it
+10×+ if ever needed.
+
+**Resulting architecture (kills the data-movement objection):** dedicated CH
+cluster, ALL tables sharded by (contract, address) — transfers/changes
+dt-keyed, per-segment state `(address, nonce)`-keyed, meta (lastNonce,
+stackSize, stackTopSum). Loop per shard = one shard-local
+`INSERT INTO output SELECT * FROM executable(fold, (SELECT addr, nonce,
+groupArray(state top-K), groupArray(changes) ... GROUP BY addr))`; state
+updates ride as MV off output (or 2nd INSERT SELECT). Driver sends only
+control SQL — kilobytes; in-cluster traffic ≈ 0 (no shuffle: everything
+shard-local by construction). Deep-pop fallback: fold script emits a
+sentinel row when top-K insufficient → driver re-runs just those addresses
+with full stacks (rare). Backfill = same statement over day-batches, all
+shards parallel, zero driver bandwidth.
+
+**Alternative DBs (desk eval, rejected):** per-address non-associative fold
+is procedural-UDF territory in EVERY engine, so no engine wins on
+expressibility. Postgres/Citus: natural row-fold but 88B-change backfill and
+11B-row analytic output are not its class, and output must feed CH metrics
+anyway (two systems). DuckDB: single-node, no cluster/serving story (could be
+a backfill worker tool at most). RisingWave/Materialize: streaming frameworks
+again — the thing being left — with smaller team surface than CH. StarRocks/
+Doris: same MPP class as CH, no better fold primitive, zero in-team
+knowledge. KV stores (Scylla/FDB): state fits, analytics don't. **CH dedicated
+cluster + executable() fold recommended.**
+
+Artifacts: `sql_fold_test.py`, `fold_pipe.py` added to `clickhouse-stacks/`
+(untracked, not yet committed); architecture.md Components table updated.
+Docs: `doc/sql-fold.md` (option A reading guide: let-form pseudocode,
+fragment ↔ HandlerOneAccountChange mapping, annotated SQL) and
+`doc/executable-fold.md` (option B: script contract, invoking SQL shape,
+deployment, benchmarks, deep-pop sentinel design).
+Local CH 26.7 binary lives in the session scratchpad (not persistent).
+
+### 2026-07-15 (session 3) — prod load estimation for the "glue does the fold" shape
+
+Yordan directed a read-only prod analysis: what CH load / traffic does a
+Python-driver fold generate, real-time (5-min loop) and backfill. All numbers
+measured on prod (`-u readonly`) 2026-07-15 unless marked *estimate*.
+
+**Inventory.** Chains with BOTH `*_transfers` and `*_stacks` in CH: eth,
+erc20, polygon(+erc20), arb/opt/avax_erc20, icp, icrc_*. `bep20_transfers`
+exists (8.8B rows) but has NO stacks table. xrp + UTXO chains (btc, ltc,
+doge, bch, cardano) have stacks but NO transfers in CH — CH-native fold for
+them needs input landed first. Total transfers rows all chains: **44B**.
+
+**Real-time (last-7d, per 5-min bucket, avg):** 236k transfer rows across
+all chains (eth 30k, bep20 55k, polygon_erc20 96k, erc20 12k, opt 15k avg /
+457k max — bursty, avax 18k, arb 8k, polygon 2k, icp 64). Touched state
+keys ~76k/5min total (eth 11.3k addrs, bep20 22.7k pairs, polygon_erc20
+13.9k pairs …). Existing stacks output rates: eth 36k + erc20 28k +
+polygon 6.8k rows/5min.
+
+**State-size distribution of *recently-active* keys** (1500 sampled eth
+addrs / 800 erc20 pairs from window 2026-07-14 12:00): live segments
+median 6 (eth) / 4 (erc20), p99 2.6k / 0.9k, max 12.5M (`burn`, push-only)
+/ 69k. Lifetime max 12.5M; ERC-4337 EntryPoint 2M lifetime but 20k live.
+Naive read-full-stack-of-touched = ~145M rows/window (eth alone) —
+infeasible; **lazy top-64 = ~22 rows/key (eth), ~19 (erc20)** → ~1.5–2M
+state rows ≈ 100–200MB per 5-min window all chains, indexed reads.
+28% of touched eth addrs have >64 live — top-64 eagerly + extend-on-demand
+for deep pops (p99 live 2.6k → extensions cheap).
+
+**Fold throughput (measured, this container):** pure-Python
+`handle_account_change` = **497k changes/s single-core** (1M synthetic
+changes, 20k addrs, 60/40 in/out; output 1.7 rows/change). Steady-state
+fold CPU ≈ 1s/core per 5-min iteration.
+
+**Schema lessons (measured read-amplification on prod layouts):**
+- 5-min dt-window on `eth_transfers` (keyed `(from,type,to,dt,…)`):
+  8.3M rows / 1.5GB unc scanned for ~30k rows — 275×. Dedicated cluster
+  must keep transfers dt/block-keyed (or projection).
+- 1500-addr IN on `eth_stacks` even with assetRefId prefix: 4.2B rows read
+  — month-partitioning × 8192 granule means every (addr × month × sign)
+  costs ≥1 granule. State table must be un-partitioned (or hot/cold),
+  `ORDER BY (key, nonce)`, tombstones TTL'd.
+- Row sizes: transfers 177–270B unc (82–121B comp)/row; stacks 148B/62B.
+
+**Per-iteration totals (5-min, all CH chains, driver shape):** read ~40–60MB
+unc transfers + ~200MB unc state (lazy), fold ~1 core-second, write ~300–500k
+output+state rows. Wall-clock estimate <30s sequential — **~5–10% duty
+cycle; performance is NOT the blocker for real-time.** Solana-class (×10)
+still fits with per-chain parallelism.
+
+**Backfill (estimates from measured totals):** 44B rows = 88B changes;
+fold CPU 49 core-hours → hours at 16–32 addr-sharded workers; traffic
+~7.8TB unc (~3.5TB wire comp) through the driver → bandwidth-dominated,
+order 1–2 days all chains, few hours ETH-native alone. Server-side fold
+(UDF) would eliminate driver traffic — an optimization, not a prerequisite.
+
+Confidence: volumes/rates HIGH (measured); state-read cost MED-HIGH
+(distribution measured, dedicated-schema cost extrapolated); fold rate MED
+(synthetic mix, excl. group_and_compress); backfill wall-clock LOW-MED.
 
 ### 2026-07-14 (session 2) — spike started: ETH on stage CH; Flink-dedup nondeterminism discovered
 

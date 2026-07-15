@@ -1,6 +1,8 @@
 # Flink testability: job-graph build harness + CI gate (test-hardening step #3)
 
-**Repo:** `etherbi-flink` · **Status:** not started — this doc is the starting point for a future session · **Drafted:** 2026-06-29
+**Repo:** `etherbi-flink` · **Status:** implemented 2026-07-15 on branch `jobGraphBuildHarness` (not yet merged) · **Drafted:** 2026-06-29
+
+> **Outcome (2026-07-15):** `JobBuildHarness` + `AllJobGraphsBuildTest` landed on branch `jobGraphBuildHarness`, TDD-style: suite written first, XRPStacks confirmed red (step #2's fix commit 0d790b99 had never reached master — it lived only on `batchStacksOdt`), fix cherry-picked, suite green. Enumeration = classpath scan of the main classes dir (option b, no new deps). Partition discovery turned out to be the one build-time Kafka call; stubbed via `KafkaSource2.partitionsPerTopicOverride`. CI gate was already free — Jenkins runs `sbt test`. **The harness found 4 more jobs broken the same way** (would fail next deploy): `XRPExtractor`, `ComputeCardanoBalances`, `KafkaTopicCopier`, `KafkaTopicSorter` — quarantined in the test via `pendingUntilFixed`; follow-up fixes needed per job (type-info changes may affect savepoint compatibility). Docs-note acceptance criterion (lambda convention in `docs/`) still open.
 
 > This is **step #3** of a small test-hardening sequence that came out of a real production incident (an XRP job that compiled fine but threw `InvalidTypesException` at Flink graph-assembly time). It is a *plan*, not a record of done work.
 

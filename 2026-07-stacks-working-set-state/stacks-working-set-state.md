@@ -23,12 +23,16 @@
   [synergy](#insight-5-losing-groupandcompress-is-fine-because-of-bucketing).)
 - **Repo docs:** `etherbi-flink/docs/concepts/stacks.md`,
   `etherbi-flink/docs/decisions/configurable-odt-bucketing.md`.
-- **Architecture C (added 2026-07-14):** compute stacks natively in
-  ClickHouse (micro-batch SQL + UDF fold, ≤5-min latency budget) — spun out
-  to [2026-07-stacks-in-clickhouse](../2026-07-stacks-in-clickhouse/stacks-in-clickhouse.md).
-  Insight 2 below is a load-bearing enabler there; the step-1 measurement
-  feeds both tasks. The A-vs-B-vs-C decision point lives in that task's spike
-  plan.
+- **Architecture C (added 2026-07-14, ON HOLD 2026-07-15):** compute stacks
+  natively in ClickHouse (micro-batch SQL + UDF fold, ≤5-min latency budget)
+  — spun out to
+  [2026-07-stacks-in-clickhouse](../2026-07-stacks-in-clickhouse/stacks-in-clickhouse.md).
+  Yordan put C on hold (conflicted about migrating away from Flink; this
+  task — optimizing the Flink job — is the active direction). C's spike
+  still delivered assets this task inherits: a golden-tested executable
+  replica of the fold semantics, prod state-composition measurements
+  (see "Measured inputs" below), and validated state-rebuild SQL. Insight 2
+  below was hard-validated there.
 
 ## Problem statement
 
@@ -152,6 +156,64 @@ in `ETHAccountChanges:75` (re-key by blockNumber into another window) looks
 like exactly such a block-completion construct — trace what it feeds before
 committing to the design. Same audit for the clickhouse-tables loader side.
 
+## Measured inputs from the CH spike (2026-07-15, prod, read-only)
+
+The [stacks-in-clickhouse](../2026-07-stacks-in-clickhouse/stacks-in-clickhouse.md)
+sessions measured prod tables to size that architecture; the same numbers
+test THIS task's premises. All measured on prod ETH 2026-07-15 (method and
+queries in that task's session log).
+
+- **Working set is tiny — the core premise holds on ETH.** Touched state
+  keys per 5-min window: ETH-native ≈ 11.3k addresses, ETH ERC-20 ≈ 11.5k
+  pairs, ~76k across ALL chains with transfers in CH. Against 360M live
+  ETH-native segments total, one window touches ~0.01% of state. A lazy
+  top-64 read policy needs only ~20 segment rows per touched key (measured
+  ~22 native / ~19 ERC-20). ForSt's local cache for steady-state ETH is
+  megabytes, not disks.
+- **Live-stack distribution of *recently-active* addresses** (1,500 sampled
+  from a real 5-min window): median 6 segments, p90 347, p99 2.6k, max
+  12.5M. ERC-20 pairs: median 4, p99 897, max 69k. So cold-tier reads on
+  pop are typically tiny, with a thin heavy tail.
+- **The whales are push-only or shallow-popping.** `burn` (12.5M live,
+  push-only — EIP-1559 receipts every block), `0x…dead` (70k, push-only),
+  beacon-deposit-class contracts likewise; the ERC-4337 EntryPoint is the
+  pop-churner (2M lifetime, only 20k live). With bucketing OFF a push never
+  reads the stack (only the nonce counter); with bucketing ON it reads only
+  the top segment/batch — either way the mega-whales never cause deep state
+  reads. Supports Insight 4's "cold reads are rare and hideable".
+- **Lifetime-to-live ratio 15×** (10.56B `eth_stacks` rows ever, 5.46B
+  pushes ever, 360M live). Relevant as the rebuild-scan size (Insight 2
+  rebuild reads the output table) and as the tombstone/GC design point in
+  architecture C — NOT as RocksDB size (RocksDB holds live only).
+- **Insight 2 is now hard-validated, and an executable oracle exists.**
+  `etherbi-flink` branch `clickhouseStacks`, `clickhouse-stacks/`:
+  `stack_fold.py` is a byte-exact Python replica of
+  `HandlerOneAccountChange` + `groupAndCompress` (Scala golden tests ported,
+  14/14; validated 1338/1338 output rows vs prod baseline on a focus group;
+  further cross-checked by two independent SQL implementations on 305
+  fuzzed vectors incl. liability/remainder/zero-segment edges). Any
+  restructure this task does (re-key, per-record shape, ForSt) can diff
+  against it cheaply — no Flink run needed for semantic regressions.
+- **State-rebuild SQL exists and its read-amplification trap is known.**
+  The `argMax(…, ver)`/top-K assembly query is written out in
+  `clickhouse-stacks/doc/executable-fold.md`; measured lesson: reading
+  per-address state through the month-partitioned, `(assetRefId, address,
+  sign, dt, nonce)`-keyed prod `eth_stacks` costs ~granule-per-(address ×
+  month × sign) — 4.2B rows read for 1,500 addresses. A bootstrap/DR
+  rebuild (plan step 4) should scan-and-regroup the output table once,
+  or read from a purpose-keyed, unpartitioned copy — never point-read the
+  prod layout.
+- **Scope fact for rebuild tooling:** XRP and the UTXO chains have stacks
+  but NO transfers/changes in CH — CH-side rebuild inputs exist today only
+  for eth/erc20/polygon(+erc20)/arb/opt/avax_erc20/icp/icrc. (`bep20` has
+  transfers but no stacks job output.)
+
+Consequence for the plan: **step 1 is now partially satisfied from CH** —
+the dormant-tail premise and working-set sizing have prod evidence without
+a savepoint. What still requires the state-processor readout is the
+byte-level pricing: key-vs-value bytes, sizeNonce-vs-batches split, Kryo
+overhead — the inputs for constant-factor levers 1–3.
+
 ## Parked: constant-factor levers (evaluate later, compound with everything)
 
 Plausibly 2–3× on live-state bytes combined; none change the asymptote.
@@ -266,6 +328,16 @@ tests the dormant-tail premise on ETH.
   vs ETH itself).
 
 ## Session log
+
+### 2026-07-15 — enriched with the CH-spike measurements; C on hold, this task active
+
+Yordan put architecture C (stacks-in-clickhouse) on hold and named Flink
+optimization the active direction. Imported what transfers from C's spike:
+the "Measured inputs" section above (working-set / whale / distribution
+numbers from prod, the hard validation of Insight 2, the executable fold
+oracle on branch `clickhouseStacks`, rebuild-SQL + read-amplification
+lessons, rebuild-scope facts). Step 1 re-scoped: premise checks done via
+CH; savepoint readout still owed for byte-level lever pricing.
 
 ### 2026-07-14 — investigation distilled into this task
 
