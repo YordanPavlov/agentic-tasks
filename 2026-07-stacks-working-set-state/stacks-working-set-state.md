@@ -117,13 +117,28 @@ consumer groups by `(dt, odt)` — arrival order is invisible.
 
 ### Insight 5 — losing `groupAndCompress` is fine *because of* bucketing
 
-The async/per-record shape cannot run the window variant's block-level
-same-sign compaction before touching state. But 5-min odt bucketing merges
-same-bucket inflows into the open top segment anyway, subsuming most of what
-block-level compaction bought. **The bucketing branch is what makes the
-per-record shape state-competitive** — the two tasks compose. Residual cost:
-one state commit per record instead of per address per block window — an I/O
-question the async batching should largely absorb; measure it.
+The per-record shape does not run the window variant's block-level same-sign
+compaction (it processes one change at a time, so there is no per-block batch to
+compress before touching state). But 5-min odt bucketing merges same-bucket
+inflows into the open top segment anyway, subsuming most of what block-level
+compaction bought. **The bucketing branch is what makes the per-record shape
+state-competitive** — the two tasks compose. Residual cost: one state commit per
+record instead of per address per block window — an I/O question the async
+batching should largely absorb; measure it.
+
+**Correction (2026-07-16): dropping the window is a *choice*, not a framework
+limit.** An earlier framing here implied the async model *cannot* use windows.
+That is wrong for Flink 2.3: DataStream keyed window operators **do** support
+async State V2 on ForSt (FLIP-488; `enableAsyncState()` on `WindowedStream`;
+async window operator in 2.0.0 / FLINK-37028, `trigger` async in 2.2.0 /
+FLINK-38363). So eliminating the V1 keyed-state API does **not** require removing
+windowing across the codebase. We still converge the *stacks* window variant onto
+the per-record flatmap twin — because bucketing subsumes `groupAndCompress`, the
+twin already exists, and per-record is the shape that hides cold reads (Insight 4)
+— but other windowed operators can stay windows and just gain `enableAsyncState()`
+(pending a spike on whether a *stateful* user `WindowFunction.apply()` can chain
+`StateFuture`s; `.apply()` is a synchronous batch callback). See
+[forst-async-migration-plan.md](./forst-async-migration-plan.md).
 
 ### Insight 6 — current keying is wrong for async, in both job variants
 
@@ -328,6 +343,50 @@ tests the dormant-tail premise on ETH.
   vs ETH itself).
 
 ## Session log
+
+### 2026-07-16 — ForSt + all-keyed-async migration plan approved
+
+Yordan confirmed the direction and widened it: **ForSt becomes the sole state
+backend (no config knob)** and **every keyed-state operator migrates to the async
+State V2 API**, removing the repo's dependency on the V1 *keyed* state API. Deploys
+run pinned images, so master can carry a single backend freely. Approved plan
+written to [forst-async-migration-plan.md](./forst-async-migration-plan.md)
+(planning only this session; implementation deferred).
+
+Key outcomes of the session:
+- **Full stateful-operator inventory:** 13 keyed-state operators (9 window-based on
+  the 1 ms/block tumbling window, 4 per-record flatmaps) + 3 stateless sort windows
+  + operator-state users (dedup filters, metric counters). **No timers, no TTL**
+  anywhere — removes two async/ForSt maturity risks.
+- **Corrected window/async finding (see Insight 5):** DataStream windows **can** use
+  async State V2 on ForSt in 2.3 (FLIP-488). Eliminating V1 does *not* require
+  ripping out windowing; Path W (keep window + `enableAsyncState()`) vs Path P
+  (convert to `KeyedProcessFunction`) is gated by a Phase-0 spike on whether a
+  stateful `WindowFunction.apply()` can chain `StateFuture`s.
+- **Backend flip decouples from the API migration:** under V1 sync, ForSt degrades to
+  a local store, so `rocksdb → forst` can ship globally first (Phase A) at low risk
+  before any operator is converted.
+- **Checkpoint dedup confirmed** (the original question): with ForSt primary-dir ==
+  checkpoint-dir (default), checkpoints *reference* the already-remote files
+  (fast-duplicate), so state is **not** duplicated the way RocksDB (local primary +
+  S3 backup) duplicates it today.
+- **"Zero V1" floor:** operator state (`CheckpointedFunction`) has no V2 equivalent;
+  recommended scope is "no V1 *keyed* state" (Option 1), with strict zero-V1
+  (Option 2) available at the cost of re-keying the dedup filter and resetting two
+  observability counters on restart. Decision still open (only affects Phase C).
+- **Stacks handler restructure designed:** async prefetch → unchanged in-memory
+  push/pop → async commit; size-adaptive prefetch + bounded (≤2-round) re-run for
+  deep pops; fold size/nonce/progress into one `AccountHeader` KV; async golden-test
+  harness via completed-`StateFuture` mocks.
+- Phase-0 spike also tests **State-Processor-API vs ForSt/V2** — likely unsupported,
+  which would block this task's Plan step 1 (byte-level state measurement via
+  savepoints); fallback: measure via a debug operator/metrics or defer.
+- **Reverted odt cohort-batching from `batchStacksOdt`** at Yordan's request — the
+  modest <30% win didn't justify shipping the standalone lossy lever. Code restored to
+  the pre-bucketing baseline (`39b44652`); all 26 stacks/job-graph tests pass. The ADR
+  `configurable-odt-bucketing.md` is kept, status→reverted. **Recoverable at `788c0ded`;
+  must be re-introduced in the async migration's Phase B3** (per-record shape needs it —
+  Insight 5). Not committed — left in the working tree for review.
 
 ### 2026-07-15 — enriched with the CH-spike measurements; C on hold, this task active
 
