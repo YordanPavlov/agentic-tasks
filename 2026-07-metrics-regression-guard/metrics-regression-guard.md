@@ -248,3 +248,78 @@ Operator challenged the prod-CH pinning: the baseline is **ground truth** (froze
 - **What stage actually lacks is the computed/loaded price INPUT history:** `intraday_metrics_historic_optimization` (the seam's ASOF acquisition-price grid) and `daily_metrics_v2` (daily price bundle = the seed source) have **0 rows for eth < 2017 on stage**. Without them a stage recompute 0-fills every cohort's acquisition price and has no daily prices — garbage against any baseline. Fix = one-time copy of frozen inputs from prod (~148k grid rows + ~23k bundle rows for the ETH fixture).
 - **Design reversed (edits in working tree, NOT committed):** dropped `GUARD_CH_HOST` prod-pinning + `DAILY_CLICKHOUSE_PORT`; guard always uses the cluster-local ClickHouse; ONE baseline everywhere (ground-truth principle: cross-cluster divergence = data-quality finding, e.g. exporter/backfill drift — a feature, not a bug, of the single baseline). Bonus: dev-triggered runs no longer touch prod's *_guard scratch (no interleaving with the nightly). DAG docstring prerequisites now include the stage input backfill. Kept from §12.7: ENVIRONMENT-selected image off production, unscheduled off production, strict dry-run gate.
 - **Session process note:** operator updated global CLAUDE.md — no auto commit/push; this session: edits only, operator reviews (docker-airflow `00a73c67` was already pushed before the instruction; the reversal sits uncommitted on top).
+
+---
+
+## 13. Feasibility analysis — enforce the write surface via ClickHouse credentials (2026-07-17)
+
+Operator direction: replace *trust* in the `guard_write_surface` gate with *enforcement* — (1) move the `*_guard` tables into a dedicated database, (2) run the guard as a dedicated `regression_guard` user: readonly on `default`, read-write only on the guard database. **Verdict: FEASIBLE**, with a small, well-bounded change set. The gate stays as defense-in-depth (fails fast pre-run; credentials would otherwise fail mid-run at job N of 53).
+
+### 13.1 How users are actually managed on the cluster (investigated)
+
+- The prod cluster (`clickhouse.production.san:30900` = `devops/prod/k8s-apps/clickhouse`, 3-replica `default_cluster`, CH **25.3.6**) has users in **two stores**:
+  - **XML (`users_xml`)** via the chart's `templates/configmap_usersd.yaml`: `default`, `web` (profile `readonly`), `sanbase`. Git-tracked.
+  - **SQL (`local_directory`)**, created ad hoc by an admin, NOT in git: `admin` (ALL + GRANT OPTION, sha256 pw), `backend`, `ci_automation`, `cluster`, `readonly`, `readonly_user`, `datascience`.
+- **`backend` — the user DMF (and the guard) currently connects as — is `GRANT ALL ON *.*` with `no_password`.** The entire write-protection today is the parse-the-dry-run gate; the §12.3 labeled-table leak went straight through it. Credentials enforcement closes that incident class structurally: a missing redirect becomes `ACCESS_DENIED`, not a prod write. (Broader observation, out of scope: passwordless ALL-on-everything `backend` is a standing exposure for every service on the network.)
+- `readonly` = `GRANT SELECT, dictGet ON *.* ` + NAMED COLLECTION — the model for the read half.
+
+### 13.2 What the guard run actually needs (grant model)
+
+Verified against the code paths in the 53-job set:
+
+- **Reads**: raw tables, prices, `metric_metadata`/`asset_metadata`, dictionaries → `SELECT, dictGet ON *.*`.
+- **Writes**: only the 7 redirected output tables → full DML/DDL on the dedicated db only.
+- **Scratch**: all mid-run scratch (`tmp_metric_table*`, `tmp_delta_futures`, `*_tmp_asset_mapping_*`, `tmp_composite_*`, asset-metadata temp) is **`CREATE TEMPORARY TABLE`** — session-scoped, NO persistent-write grant needed. Two ClickHouse subtleties: `scoped_merge_tree_table*` creates temporary tables **with an explicit MergeTree engine**, which since CH 23.x needs the separate `CREATE ARBITRARY TEMPORARY TABLE` grant; verify both on stage.
+- **One genuine non-guard write path**: `cumulative_sum_job`'s negative-value debug hook does `CREATE TABLE IF NOT EXISTS test.debug_cumsum_* + INSERT` (fires only on anomaly). Either grant `CREATE TABLE, INSERT ON test.*` (test is scratch; recommended — an anomaly then produces its diagnostic instead of a confusing ACCESS_DENIED) or make the hook non-fatal.
+
+```sql
+-- one-time, as admin, per cluster (prod + stage), ON CLUSTER default_cluster:
+CREATE DATABASE IF NOT EXISTS regression_guard ON CLUSTER default_cluster;
+CREATE USER IF NOT EXISTS regression_guard ON CLUSTER default_cluster
+  IDENTIFIED WITH no_password SETTINGS PROFILE 'default';   -- NOT profile readonly (readonly=2 blocks granted writes too)
+GRANT ON CLUSTER default_cluster SELECT, dictGet ON *.* TO regression_guard;
+GRANT ON CLUSTER default_cluster CREATE TEMPORARY TABLE, CREATE ARBITRARY TEMPORARY TABLE ON *.* TO regression_guard;
+GRANT ON CLUSTER default_cluster SELECT, INSERT, ALTER, CREATE TABLE, DROP TABLE, TRUNCATE, OPTIMIZE ON regression_guard.* TO regression_guard;
+GRANT ON CLUSTER default_cluster CREATE TABLE, INSERT ON test.* TO regression_guard;  -- debug hook (optional, recommended)
+```
+
+**Where the user definition should live — recommendation: the devops chart's `configmap_usersd.yaml` (XML), not ad-hoc SQL.** Modern CH XML users take an explicit `<grants>` block (each line a GRANT statement), so the whole grant model above is expressible in git-tracked XML, reviewed like any devops PR, identical stage/prod. users.d is hot-reloaded (no CH restart; configmap propagation ~1 min — verify on stage). Ad-hoc SQL (current practice for `backend` et al.) also works but perpetuates the untracked-user pattern.
+
+### 13.3 Code changes (all in the two open PRs, modest)
+
+- **Redirects become db-qualified**: `GUARD_OUTPUT_ENV` values → `regression_guard.<real_table_name>` (recommend dropping the `_guard` suffix inside the db — names mirror prod 1:1). Config table names are plain f-string interpolation into SQL (`FROM {t}` / `INSERT INTO {t}` / `CREATE TEMPORARY TABLE x AS {t}`) — dotted names are syntactically fine; no backtick-quoting or `system.tables`-lookup patterns found in the DMF paths. The strict dry run validates this end-to-end for free before anything writes.
+- `table_qa/guard_tables.sql` → DDL in `regression_guard` db (new ZK paths including the db).
+- `table_qa/metric_baselines.py` → generalize `table_suffix` ("+`_guard`") to a table prefix/db override (`regression_guard.` + name).
+- `table_qa/guard_write_surface.py` → assert every persistent write target's **database == `regression_guard`** (keep the temporary-table exclusion; the `test.debug_*` allowance stays).
+- `table_qa/guard_seed_prices.py` → target `regression_guard.daily_metrics_v2`.
+- DAG (`metrics_regression_guard.py`) → db-qualified `GUARD_OUTPUT_ENV` + `DAILY_CLICKHOUSE_USER=regression_guard`.
+
+### 13.4 Migration sequence
+
+1. **Decisions** (operator): XML-in-devops vs SQL-by-admin; drop `_guard` suffix inside the db (recommended); grant `test.*` for the debug hook (recommended).
+2. **Provision stage first**: user + db + grants; verify the temp-table grants and users.d hot-reload behave as expected.
+3. **Provision prod** (devops PR merge or admin SQL); create the 7 tables in `regression_guard` (updated `guard_tables.sql`).
+4. **Preserve the blessed state without a re-record**: `INSERT INTO regression_guard.<t> SELECT * FROM default.<t>_guard` (columns incl. `computed_at` copy verbatim → the committed 531-metric baseline stays valid; self-check against the new location confirms). Then `DROP` the old `default.*_guard` tables.
+5. **Code + DAG edits** (§13.3) on the open `metricsQA` PRs.
+6. **Validate**: strict dry-run gate (all writes → `regression_guard.*`), then a real run **as `regression_guard`**, check vs baseline green. **Negative test**: as `regression_guard`, attempt an `INSERT` into a `default.*` served table → expect `ACCESS_DENIED` (the §12.3 scenario, now structurally impossible).
+7. Stage side (per §12.8's cluster-local direction): same db/user on stage + the still-pending frozen-input backfill before dev-instance runs mean anything.
+
+### 13.5 IMPLEMENTED (2026-07-17, same session — edits in working trees, NOT committed)
+
+Operator decisions: **(1) XML-in-devops** for the user, **(2) drop the `_guard` suffix** inside the db, **(3) grant `test.*`** for the debug hook. All three implemented:
+
+- **devops** (`stage/k8s-apps/clickhouse/templates/configmap_usersd.yaml`): `regression_guard` XML user added — profile `default`, `<grants>`: `SELECT, dictGet ON *.*`; `CREATE TEMPORARY TABLE, CREATE ARBITRARY TEMPORARY TABLE ON *.*`; `SELECT, INSERT, ALTER, CREATE TABLE, DROP TABLE, TRUNCATE, OPTIMIZE ON regression_guard.*`; `CREATE TABLE, INSERT ON test.*`. **Discovery: `prod/k8s-apps/clickhouse/templates` is a SYMLINK to the stage chart's templates** — one edit covers both clusters (they differ only in values files).
+- **clickhouse-tables** (5 files, metricsQA): `guard_tables.sql` → `CREATE DATABASE regression_guard` + the 7 tables inside it, suffix-free, ZK paths `/clickhouse/tables/regression_guard/<name>`, migration comment (INSERT…SELECT from legacy `default.*_guard`, then DROP); `metric_baselines.py` → `table_suffix` replaced by `db` param / `--db` CLI flag; `guard_write_surface.py` → asserts every persistent write is **db-qualified into `regression_guard`** (unqualified names = default db = violation; legacy `*_guard` names in default now correctly FAIL — verified with a synthetic-SQL unit run); `guard_seed_prices.py` → targets `regression_guard.daily_metrics_v2` (runs as the regression_guard user — its grant set is exactly this flow); `Makefile` → DDL as admin-grade user, seed as `regression_guard` (SEED_USER var).
+- **docker-airflow** (`dags/metrics_regression_guard.py`): `GUARD_OUTPUT_ENV` values db-qualified; `DAILY_CLICKHOUSE_USER=regression_guard` in the recompute/gate pods, `CLICKHOUSE_USER=regression_guard` in the check pod; check passes `--db regression_guard`; docstring prerequisites updated (user via devops usersd; db+tables as admin; record `--db regression_guard`). py_compile OK.
+
+Still to do (operator / next session): deploy the clickhouse chart (stage first) → verify user + temp-table grants + hot-reload; run updated `guard_tables.sql` as admin; migrate the blessed rows + drop legacy `default.*_guard`; trigger a dev-instance run end-to-end; **negative test** (as regression_guard, `INSERT` into a served `default.*` table → expect ACCESS_DENIED).
+
+**Review follow-up — dry-run policy centralized (2026-07-17, later same day):** PR reviewers flagged §12.2's `execute_dml→execute_dql` swaps as dangerous — correct instinct: it silently rewrote `execute_dql`'s contract to "always executes even in dry-run," with safety resting on a call-site comment (the next copy of the pattern, for a persistent scratch table, would make dry-run write — and DMF dry runs also happen as `backend` outside the guard). Replaced with the centralized fix: `execute_dml` now implements dry-run's real contract (*no PERSISTENT writes*, not "no statements") — it tracks `CREATE TEMPORARY TABLE` names and executes statements touching only those (INSERT/DROP on tracked temps) even when dry; both call sites reverted to `execute_dml`. Explored but rejected making dry-run "true" (zero reads/creates): SQL generation is data-dependent (50 `execute_dql` sites / 27 files — id resolution, min/max-dt batching, gap detection), so stubbing reads forks control flow and hides branches from the write-surface gate (the §12.3 blind-spot class, made permanent); a plan/execute refactor is a rewrite. Possible cheap third layer instead: a static CI check that every written `*_table` config key carries a `regression_guard.` override. Caveat documented: dry-run is zero-mutation, not zero-load (temp-table INSERT…SELECT executes its read side).
+
+**Committed (2026-07-17):** devops `d58f1e78` (operator; branch `regressionGuardUser`) — the XML user; clickhouse-tables `ede9d927` (guard db + credentials, table_qa) + `d13d910c` (dry-run centralization, daily_metrics) on metricsQA; docker-airflow `53117c78` (DAG user + db-qualified redirects) on metricsQA. Not pushed.
+
+### 13.6 Residual risks / notes
+
+- `no_password` for `regression_guard` matches cluster convention (network-gated); its blast radius is the guard scratch db — acceptable, and a huge narrowing vs `backend`'s ALL.
+- Concurrent guard runs (nightly + dev-triggered on stage) share the scratch db — pre-existing situation, `computed_at` dedup handles it.
+- The one-time daily-price seed (operator prereq per chain) must also be re-pointed at `regression_guard.daily_metrics_v2` — it can no longer run as `backend` by accident, which is exactly the point.
