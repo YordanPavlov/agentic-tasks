@@ -323,3 +323,31 @@ Still to do (operator / next session): deploy the clickhouse chart (stage first)
 - `no_password` for `regression_guard` matches cluster convention (network-gated); its blast radius is the guard scratch db — acceptable, and a huge narrowing vs `backend`'s ALL.
 - Concurrent guard runs (nightly + dev-triggered on stage) share the scratch db — pre-existing situation, `computed_at` dedup handles it.
 - The one-time daily-price seed (operator prereq per chain) must also be re-pointed at `regression_guard.daily_metrics_v2` — it can no longer run as `backend` by accident, which is exactly the point.
+
+## 14. Session log — 2026-07-17 — daily price seeding removed (in-run daily-prices-and-volumes)
+
+**Trigger:** operator found the `daily-prices-and-volumes` DMF cronjob and asked whether it could replace the daily-price seed bootstrap.
+
+### 14.1 Finding
+
+The seed step's premise (guard_seed_prices.py docstring: the daily bundle "is NOT computed by any DMF job") was **wrong**. `daily-prices-and-volumes` (`prices_job`, selectors priceMetric×priceable) computes exactly the 8 seeded metrics from raw `asset_prices_v3` (source=coinmarketcap, `marketcap_usd < 1e13`, FINAL) — prod's own served daily price history comes from this job.
+
+### 14.2 Verification (prod, readonly)
+
+- `asset_prices_v3` ETH coverage: 2015-08-07 (listing) → full 2016, no zero prices.
+- Recompute vs served `daily_metrics_v2` (asset 1681, 2015-2016): closing/avg price, avg marketcap, trading volume **bit-exact** — 513 days, 0 mismatches, max diff 0; served days absent from raw (pre-listing) are all zero, matching prices_job's cross-product zero-fill.
+- DMF dry run with `DAILY_JOBS=daily-prices-and-volumes,eth-composite-metrics`: prices job selected (8 metric ids, asset 1681) and topologically sorted FIRST — daily consumers (mvrv_metrics, daa_divergence, composites) already declare `dependsOn` on the daily price metrics, so no seam fix needed (unlike the intraday 07-07 case).
+- Write-surface: prices_job's scratch is `CREATE TEMPORARY TABLE` (session-scoped, gate-excepted); INSERT goes to `daily_metrics_table` → redirected by `DAILY_DAILY_METRICS_TABLE`.
+
+### 14.3 Changes (committed + pushed, metricsQA both repos)
+
+- clickhouse-tables `fdedefb1`: `guard_seed_prices.py` deleted; Makefile `seed_prices` target removed (stage NOTE re-pointed at raw asset_prices_v3 coverage); the 8 daily price metrics added to the ETH baseline daily group (recorded from served prod = bit-exact with in-run output; **531→539 asserted**), per_metric rtol 0.002 mirroring intraday price_usd (same mutable raw table re-read nightly).
+- docker-airflow `94b81711`: `PRICE_JOBS = ("daily-prices-and-volumes",)` appended to every fixture's job set (the job has no chain prefix, so `onchain_jobs()`'s prefix filter drops it; `DAILY_ASSETS` scopes it); DAG docstring prerequisite updated — NO price seeding of any kind.
+
+**Merge coupling:** docker-airflow side first or together — the baseline now asserts the 8 price metrics, so a run without the DAG change reports them `missing`. Old seeded rows in `regression_guard.daily_metrics_v2` are inert under the check's `--since` filter.
+
+### 14.4 Residual
+
+- Trade-off accepted: guard now re-reads `asset_prices_v3` nightly for the daily bundle — an upstream revision of 2015-2016 price history surfaces as diffs (also through MVRV etc.); with the seed it was frozen. Same exposure as intraday price_usd.
+- §13.6's note about re-pointing the seed at regression_guard is moot — the seed no longer exists.
+- Stage: `asset_prices_v3` coverage for the window UNVERIFIED — stage CH reset every connection from the agent container today (even `SELECT 1`); environment issue flagged to operator.
