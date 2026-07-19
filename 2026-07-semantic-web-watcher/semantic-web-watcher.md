@@ -6,11 +6,13 @@ new developments of houses around Sofia — "комплекс от къщи"), j
 LLM instead of keyword matching. Runs daily via cron on the host PC, presents
 confirmed matches in the terminal on demand.
 
-**Status: M0 complete + most of M1/M2 built and tested (2026-07-14 coding
-session): 165 unit/plumbing tests green, both LLM eval suites (`pytest -m
-llm`) pass against the real `claude` backend. Next: set `BRAVE_API_KEY`,
-copy `interests.example.toml`, do the first real run (seed), add the
-cron/anacron entry.**
+**Status: M0 complete + most of M1/M2 built and tested. 163 unit/plumbing
+tests green; both LLM eval suites (`pytest -m llm`) pass against the real
+`claude` backend. CI runs the offline suite on push/PR (GitHub Actions).
+First real runs done in-container against the property intent (Brave key +
+proxy cert env set). First-run behavior is now cold start, not silent seed
+(decision 8 amended 2026-07-17). Next: cron/anacron entry, Tier-2
+embeddings, story clustering.**
 
 ## Problem statement
 
@@ -121,9 +123,20 @@ A 5%-precision candidate stream is fine when classification is near-free.
    entity/embedding, notify per cluster. Search
    engines get no cursor — freshness window widens to cover gaps
    (skipped 3 days → "past week"); sitemap `lastmod` is a hint, hash is the
-   arbiter. First run = silent seed mode. `published_at` (page's own,
-   LLM-extracted) ≠ `first_seen_at` (ours) — notify on "first-seen now AND
-   published recently or unknown".
+   arbiter. First run = **cold start** (amended 2026-07-17; supersedes
+   "silent seed mode"): the first run judges and surfaces every existing
+   match immediately, and the seen-store alone gives the new-only steady
+   state (a URL considered once is terminal, never reprocessed). Rationale:
+   the initial catalog of already-existing matches is the most valuable
+   thing to a brand-new user, and seed-suppression discarded it permanently;
+   the first cohort is small (~40) and cheap to judge, so the flood argument
+   is weak. Chosen over the hybrid "seed-but-show-once" for simplicity — no
+   `seeded_at` cursor, no baseline concept, first run is just an ordinary run
+   against an empty DB. Trade-off accepted: a genuinely old page that a
+   search engine only *indexes* later still alerts as new-to-me; the
+   principled fix is `published_at` gating, deferred. `published_at` (page's
+   own, LLM-extracted) ≠ `first_seen_at` (ours) — the future refinement is to
+   notify on "first-seen now AND published recently or unknown".
 
 9. **TDD, small units over integration** (user requirement). Every phase
    takes dependencies as arguments; fakes at the seams. Pyramid:
@@ -316,3 +329,86 @@ judged syn-yes/syn-no/bg-mamma correctly with clean metadata
 container), cron entry, Tier-2 embeddings, story clustering, domain
 priors, site: escalation. Open design nit for next session: eval INTENT
 string is duplicated in test_llm_eval.py rather than read from config.
+
+### 2026-07-17 — ops session (Claude Code): CI, cert fixes, cold start
+
+Container-side operational work + one design change.
+- **CI:** added `.github/workflows/ci.yml` (uv → `uv sync --frozen` →
+  `uv run pytest`, push/PR to main). Only the offline suite runs; `-m llm`
+  stays manual (needs subscription token + network + tolerance for
+  non-determinism). Push blocked from the container: the git credential
+  token has only `repo` scope, not `workflow` — GitHub refuses any write
+  touching `.github/workflows/` without it (git push AND REST API). Worked
+  around via the GitHub web UI.
+- **TLS certs (container proxy):** two symptoms, one root cause — the
+  container runs a TLS-intercepting proxy whose self-signed CA lives only in
+  the OS store (`/etc/ssl/certs/ca-certificates.crt`), not in the bundled CA
+  lists that `uv` (webpki) and Python `httpx` (certifi) verify against. uv
+  fixed earlier via `system-certs = true`. Runtime `sww run` fixed by
+  `SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt` (httpx 0.28 honors it;
+  verified against the live Brave endpoint). Recommended baking this into the
+  harness image (it already sets `NODE_EXTRA_CA_CERTS` — same fix, Node only;
+  extend with SSL_CERT_FILE / REQUESTS_CA_BUNDLE / UV_NATIVE_TLS). Both cert
+  facts saved to auto-memory.
+- **First real runs:** seeded then ran against the property intent. 40
+  candidates crawled from Brave; one new candidate next run (a 24chasa
+  business article) LLM-triaged and rejected. Confirmed `claude` is
+  authenticated in the container without `CLAUDE_CODE_OAUTH_TOKEN` set.
+- **Design change — cold start replaces silent seed mode (decision 8
+  amended).** User questioned why an empty baseline suppresses all existing
+  results. Chose option 2 (cold start) over the hybrid for simplicity:
+  removed the seed short-circuit and `seeded_at` cursor from `pipeline.run`,
+  removed the query-expansion seed gate (expansion now runs from run 1),
+  renamed `SEED_FRESHNESS_DAYS`→`FIRST_RUN_FRESHNESS_DAYS`, deleted
+  `db.seed_pending_triage` and the `'seed'` triaged_by value. Tests-first:
+  replaced the two seed-mode pipeline tests with cold-start + rediscovery
+  (seen-store idempotence) tests, rewrote the expansion test, dropped two
+  db seed tests. 163 unit tests green. README + decision 8 updated. Shipped
+  on branch `cold-start` → PR #2; CI ran green on the PR (14s) — first
+  end-to-end proof the workflow fires on PRs. User then removed the seeded
+  operational DB, so the next `sww run` cold-starts for real.
+- **DB inspection / visualization.** No SQLite CLI tools shipped in the
+  container (`sqlite3`, `datasette`, `litecli`, `sqlite-utils` all absent);
+  Python stdlib `sqlite3` is the only built-in. Installed the good ones via
+  `uv tool install --system-certs <pkg>` (global installs don't read the
+  repo `uv.toml`, so the `--system-certs` flag is required — or set
+  `system-certs = true` in `~/.config/uv/uv.toml` once): **datasette** (web
+  UI, best visual explorer — port needs forwarding out of the container,
+  frictionless on the host desktop), **sqlite-utils** (headless CLI +
+  scripting), **litecli** (nicer interactive REPL). Key insight for this
+  system: because pipeline state IS the NULL-pattern of stage columns
+  (decision 11), one CASE query mirroring db.py's predicates
+  (`pending_triage`/`pending_fetch`/`fetch_given_up`/`pending_judge`/
+  `unpresented_matches`) renders the whole funnel — discovered → triaged →
+  fetched → judged → match → presented — in a single view. Wrote a zero-dep
+  `inspect_db.py` (scratchpad) that prints cursors + the funnel + recent
+  rows with computed stage labels; demoed against a synthesized DB.
+  **Idea for next session:** promote it to a `sww inspect` subcommand
+  (testable, stays in sync with the predicates since db.py owns them).
+
+### 2026-07-18 — coding session (Claude Code): `sww inspect` subcommand
+
+Promoted last session's scratchpad `inspect_db.py` idea to a real,
+testable subcommand (the scratchpad copy was gone — session-specific dir).
+Confirmed the goal with the user first: the **operational funnel** view,
+not datasette-style row exploration.
+- **db.py (state-machine owner keeps all lifecycle SQL):** added a row-level
+  classifier `stage_label(row)` mirroring the predicate functions, the
+  `STAGE_*` constants + `STAGE_ORDER`, `funnel_counts` (classifies every row
+  via a LEFT JOIN to clusters for presented-vs-unread), `recent_pages`,
+  `all_cursors`, `content_store_stats` (reuses `hashes_eligible_for_gc`).
+- **inspect.py:** read-only `render(conn, *, now, recent)` — cursors block,
+  the stage funnel (all 8 stages, zero-filled), content-store accounting,
+  and recent pages each tagged with their computed stage label. Cyrillic
+  titles render clean.
+- **cli.py:** `sww inspect --config --recent`.
+- **Drift guard (the key design point):** `test_stage_label_and_funnel_agree_
+  with_predicates` asserts `funnel_counts[stage] == len(predicate(conn))` for
+  all five pending/stuck predicates, so the view can never silently diverge
+  from db.py's state definitions. Plus store-stats + inspect render/read-only
+  + CLI tests. **172 offline tests green** (was 163; +9). Demoed the real
+  CLI against an 8-stage synthesized DB — funnel partitions all rows,
+  cursors/store/recent all correct. README updated (commands + why-funnel).
+  Not committed yet (awaiting user's high-confidence bar). Next ideas
+  unchanged: Tier-2 embeddings, story clustering, domain priors, site:
+  escalation; eval INTENT still duplicated in test_llm_eval.py.
