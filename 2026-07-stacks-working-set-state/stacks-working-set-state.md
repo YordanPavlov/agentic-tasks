@@ -64,9 +64,14 @@ everything still below it; liabilities sit at `ots = 0`.
 
 Consequence: the downstream-visible stack content equals the **net cohort
 composition** — `sum(sign · amount) GROUP BY odt` over the job's own emitted
-rows, ordered by `odt`. The only non-reconstructible field is the per-segment
-`nonce`. So **Flink state is a materialized view of the job's own sink** and
-can be rebuilt from ClickHouse at any time. Even independent of the main
+rows, ordered by `odt`. So **Flink state is a materialized view of the job's
+own sink** and can be rebuilt from ClickHouse at any time. *(Corrected
+2026-07-23: an earlier version claimed the per-segment `nonce` is
+non-reconstructible. Under current coin-ledger semantics it IS recoverable —
+every coin has one birth row and ≤1 death row, so an anti-join on nonce
+recovers surviving coins exactly, incl. stack order via `(ots, nonce)`. The
+nonce only becomes non-reconstructible under bucketing/cohort merging, which
+breaks the birth/death pairing.)* Even independent of the main
 direction, this buys: state bootstrap for new layouts, migrations without
 replaying chain history, disaster recovery.
 
@@ -233,15 +238,15 @@ overhead — the inputs for constant-factor levers 1–3.
 
 Plausibly 2–3× on live-state bytes combined; none change the asymptote.
 
-1. **Drop stored `nonce`; mint fresh nonce on pop** (the bucketing merge path
-   already mints on emit; downstream pairs by `odt`, never `nonce`). Segment
-   becomes `(ots, value)`. Prerequisite for clean CH-rebuild (Insight 2).
-   Needs the same raw-table `ORDER BY` distinct-rows check as the bucketing
-   ADR.
+1. ~~**Drop stored `nonce`; mint fresh nonce on pop**~~ — **CLOSED 2026-07-23**:
+   implemented, reviewed, reverted. Yordan keeps coin-ledger semantics (pop
+   echoes the spent coin's construction nonce); only worth reopening if the
+   bucketing/cohort direction is revived. See the 2026-07-23 session log.
 2. **Fold `sizeNonceState` into the top batch's KV** — halves KV count and
    key bytes for the dominant tail of 1–2-segment dormant addresses (the
    ASCII `(contract, address)` key is stored twice today). Combines with
-   Insight 7.
+   Insight 7. **IMPLEMENTED 2026-07-23** (head-entry layout, uncommitted on
+   `stacksOptimizations` — see session log).
 3. **Binary-encode keys** — ETH addresses are hex-as-ASCII: 42 → 20 bytes,
    lossless, no hashing/collisions. Chain-specific for XRP (base58).
 4. **Cheapen `ots`** — store seconds (or bucket index) not ms, delta-encode
@@ -343,6 +348,124 @@ tests the dormant-tail premise on ETH.
   vs ETH itself).
 
 ## Session log
+
+### 2026-07-23 — lever 1 implemented then REVERTED by decision; lever 2 implemented
+
+**Lever 1 (mint fresh nonce on pop): implemented, reviewed, and rejected.**
+Yordan keeps the coin-ledger semantics: the nonce identifies a unique coin and
+a `-1` row echoes the spent coin's construction nonce. His argument, verified
+in discussion: under current semantics every coin has exactly one birth row
+and ≤1 death row (partial spends = whole-coin pop + new remainder coin), so
+per-address surviving coins **including their nonces** are exactly recoverable
+from the output table via anti-join (`+1` nonces with no matching `-1`), and
+even exact stack order via sort by `(ots, nonce)`. **Correction to Insight 2:**
+"the only non-reconstructible field is the per-segment nonce" is wrong for
+current semantics — it becomes true only under bucketing/cohort merging, which
+breaks the birth/death pairing invariant. Since bucketing/cohort is not
+planned (estimated gains too small — see 2026-07-16 revert), lever 1's payoff
+doesn't justify giving up the coin model. **Lever 1 is closed** unless the
+bucketing direction is revived.
+
+Kept from the lever-1 work (still valid): the "drop nonce entirely, key by
+`(assetRefId, address, sign, dt, odt)`" variant is dead — measured on prod
+2026-07-21: 184,560 colliding key groups / 507,996 rows in one day (worst
+group 513), incl. same-key rows with identical amounts; `eth_stacks_shard_v4`
+is `ReplicatedReplacingMergeTree ORDER BY (assetRefId, address, sign, dt,
+nonce)` so key duplicates silently collapse; the Kafka record key also embeds
+nonce (`AccountModelChange.serializationKey`). Also: the window-harness golden
+tests in `ComputeAccountSegmentChangesTest` are commented out wholesale — live
+handler coverage is thinner than it looks.
+
+**Lever 2 (fold `sizeNonceState` into the top batch's KV): implemented**,
+uncommitted on `etherbi-flink` branch `stacksOptimizations` for review
+(alongside the Flink 2.3 + dependency commits; all 105 tests + assembly pass).
+Design — "head entry" layout, account-model twins only (window + flatmap;
+UTXO's `NoncePair` layout untouched):
+
+- New Avro record `AccountStackHead {size, nonce, segments}`
+  (`account-head.avsc`, references `StorageSegment` cross-file — sbt-avro
+  handles it). `StorageSegments` itself is untouched, so overflow entries and
+  the UTXO twin carry zero overhead from this change.
+- New MapState `account-head`, keyed by `(contract, address)` — the former
+  `sizeNonceState` ASCII key — holding `{size, nonce, top batch}` in ONE KV.
+  The Kryo `(Long, Long)` tuple state `nonce` is gone (also −1 Kryo type).
+- `account-change-store` now holds only full **overflow** batches below the
+  top, keyed `(contract, address, batchIndex)`; batch transitions flush/pull
+  between head and overflow (`increase/decreaseArraySegmentUsed`).
+- Dominant-tail addresses (≤1 batch): 2 KVs → 1 KV, key bytes halved, and
+  1 state read + 1 write per touch (was 2–3 reads + 2 writes).
+- Bonus: `putHead` persists only the live prefix of the top batch — the old
+  layout kept stale popped segments in the stored batch value until
+  overwritten.
+- Emptied addresses keep their head entry (`size=0`, empty batch): the nonce
+  counter must survive emptying or coin nonces could be reused (test encodes
+  this invariant).
+
+Landing constraint: state relayout — old savepoints are NOT restorable
+(values moved from the `nonce` state into `account-head`); needs a
+state-processor migration job or a fresh backfill. The step-1 measurement
+descriptors below describe the OLD layout, which is what prod savepoints will
+contain until this lands.
+
+### 2026-07-23 (cont.) — emptied-address clearing: design agreed, implemented for review
+
+Follow-on discussion to lever 2. Measured on prod: **39.5% of all ETH-native
+addresses ever seen are currently emptied** (1/1024 sample of `eth_balances`,
+argMax(balance) ≈ 0; ~131M of ~331M addresses) — each holding a dead head
+entry (~40–60 B incl. RocksDB overhead) forever: ~5–7 GB dead weight on ETH
+native alone, more on ERC-20 pairs; compaction/checkpoint/recovery pay for it
+forever.
+
+**Rejected designs:** emptiedAt + offline savepoint sweep, and TTL'd
+tombstones — both erase state at ops-chosen / wall-clock times, so a re-run
+(recomputation, backfill, validation harness) produces different nonce
+sequences than prod history. Yordan requires clearing to be a **pure function
+of the input stream**.
+
+**Agreed design (Yordan's): clear at block boundaries.**
+- Window variant: the window IS the block — after processing all of a block's
+  changes, remove head entries whose final `size == 0`. Intra-block
+  empty→refill cycles (forwarders, flash loans) keep full counter continuity
+  because clearing only sees the block's final state.
+- FlatMap variant: a `pendingClear` MapState (addresses emptied during the
+  current block, bounded, per contract key) drained on block advance —
+  the `progressState` hook already detects transitions; drain re-checks
+  `size == 0` so same-block rebirth needs no bookkeeping. Gives the flatmap
+  twin the same state win AND output equivalence with the window variant.
+- Cross-block nonce reuse is collision-free on CH keys iff block timestamps
+  strictly increase (ETH slots, XRP monotonic close times). For
+  same-second-block chains the **primary key must gain `blockNumber`**:
+  `ORDER BY (assetRefId, address, sign, dt, blockNumber, nonce)` — dt-prefix
+  queries unaffected, Kafka key already block-scoped. Affected tables measured:
+  `arb_erc20_stacks` 8.2B, `opt_erc20_stacks` 8.3B, `avax_erc20_stacks` 5.9B,
+  `polygon_stacks` 5.4B rows — per-chain rebuild+backfill, independent
+  migrations. Audit `clickhouse-tables` for hardcoded ORDER BY (rebuild SQL,
+  table_qa) per chain.
+- Semantics: nonce uniqueness becomes scoped to a **holding period** (resets
+  after an empty block boundary). `-1`→`+1` pairing stays exact via nearest
+  preceding birth; the global set-difference anti-join no longer holds for
+  reborn addresses. Approved by Yordan.
+- The one-time backlog flush is the lever-2 migration itself (don't carry
+  `size == 0` entries into `account-head`).
+- **Flag for [forst-async-migration-plan.md](./forst-async-migration-plan.md):**
+  after re-keying to `(contract, address)` there is no per-contract map to
+  drain — needs per-key event-time timers (deterministic but conflicts with
+  the plan's "no timers" simplification) or an equivalent; Phase-B design
+  point.
+
+Implementation (same session, uncommitted on `stacksOptimizations` with lever
+2): clearing is **unconditional** (Yordan removed the config-flag variation) —
+window-end clearing in `ComputeAccountStackChangesTimeWindow.apply`,
+`pendingClear` MapState drained on block advance in
+`ComputeAccountStackChangesFlatMap`, harness tests proving nonce restart after
+clearing and same-block continuity. **Hard deploy prerequisite therefore:**
+same-second-block chains (arb/opt/avax/polygon jobs, if any run these
+operators) must get `blockNumber` into their stacks-table ORDER BY *before*
+this build reaches them — there is no flag to hold clearing back anymore.
+The window-variant clearing needs no state (windows replay atomically; local
+map in `apply`); the flatmap needs `pendingClear` in keyed state because
+checkpoint barriers land mid-block (a heap set would leak entries on
+restore/rescale and would break keyed-context scoping).
 
 ### 2026-07-16 — ForSt + all-keyed-async migration plan approved
 

@@ -261,6 +261,12 @@ oracle first:** `stack_fold.py` is **not** in `etherbi-flink` — it's on branch
    within one per-key/block callback; validate with the comparison harness.
 9. **Re-keying / V1→V2 serializer change** — safe only if jobs replay from Kafka (Phase-0 d).
 10. **`isLate` dedup semantics** per-contract → per-(contract,address) — verify on real data.
+11. **Emptied-address clearing under per-(contract,address) keying** (added 2026-07-23) —
+    the block-boundary head-clearing shipped with lever 2 drains a per-contract
+    `pendingClear` map on block advance; after re-keying there is no per-contract map to
+    drain. Needs per-key event-time timers (deterministic, but conflicts with this plan's
+    "no timers" de-risk) or an equivalent ForSt-era mechanism. Phase-B design point — see
+    the 2026-07-23 session-log entries in stacks-working-set-state.md.
 
 ## Verification
 
