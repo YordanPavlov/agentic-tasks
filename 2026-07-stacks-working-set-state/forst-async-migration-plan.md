@@ -194,6 +194,20 @@ needs the top batch.
 `MapState`. Also fixes the stored-schema/runtime mismatch (`nonce-pair.avsc` records
 `nonceUsed+batchIndex`; runtime stores `(size,nonce)`).
 
+**Binary keyBy key — Phase B design REQUIREMENT (lever 3c, evaluated 2026-07-24 in the
+parent task).** Re-keying by true `(contract, address)` puts the Flink key into every
+RocksDB/ForSt state key. A naive `(String, String)` key costs ~86 B of ASCII + length
+prefixes per KV on ERC-20 — a ~40–45 B/KV *regression* vs today (4 B `Int` keyBy + already
+hex-decoded binary map keys via `KeyGenerator.stringAsKey`). Key instead by a dedicated
+binary type — e.g. `AccountKey(bytes: ArraySeq[Byte])` holding the KeyGenerator-encoded
+`(contract, address)` (`ArraySeq` gives deterministic MurmurHash3 value equality for
+key-group assignment) with a compact custom `TypeSerializer`. The `(contract, address)`
+prefix then leaves the map-state user keys entirely: `AccountHeader` can become
+`ValueState` (zero user-key bytes) and the overflow `store` keyed by `Long` batchIndex
+only — byte-neutral overall vs today. This amends the "kept as byte-keyed MapState"
+choice above: byte-keyed maps may survive as the *mock/harness* interface, but the stored
+keys must not duplicate what the Flink key already carries.
+
 **Note the dedup-semantics change:** folding progress per `(contract,address)` changes the
 flatmap variant's `isLate` dedup from **per-contract** (`ETHAccountChangesExact.scala:72`
 keys by contract) to **per-(contract,address)**. Since upstream is ordered per contract,
@@ -243,6 +257,12 @@ oracle first:** `stack_fold.py` is **not** in `etherbi-flink` — it's on branch
    approach. Mitigation: Phase-0 spike (a); Path P fully specified as fallback. Conf: Med.
 2. **ForSt experimental status** — API/behavior churn, remote-FS bugs. Pin 2.3.0 exactly;
    Phase-A canary; keep V1-on-ForSt-local per-operator fallback until each is validated.
+   *Project-health check 2026-07-24:* the backend module in apache/flink is actively
+   maintained (releases through May 2026, module commit 2026-07-17); the quiet
+   `ververica/ForSt` C++ fork is the normal FRocksDB-style vendored-fork pattern (Flink
+   pins `forstjni 0.1.8`, 2025-03). Residual: single-vendor C++ fork outside ASF
+   governance (bus factor), frozen RocksDB baseline, native-bug fixes gated on a
+   Ververica release cycle. See the parent task's 2026-07-24 (cont. 2) session entry.
 3. **State-Processor-API vs V2/ForSt likely unsupported** — blocks the separate byte-level
    state-measurement task (reads savepoints via SPA). Phase-0 spike (c); else measure via a
    debug operator/metrics or defer. Conf: Med.

@@ -247,10 +247,20 @@ Plausibly 2–3× on live-state bytes combined; none change the asymptote.
    ASCII `(contract, address)` key is stored twice today). Combines with
    Insight 7. **IMPLEMENTED 2026-07-23** (head-entry layout, uncommitted on
    `stacksOptimizations` — see session log).
-3. **Binary-encode keys** — ETH addresses are hex-as-ASCII: 42 → 20 bytes,
-   lossless, no hashing/collisions. Chain-specific for XRP (base58).
-4. **Cheapen `ots`** — store seconds (or bucket index) not ms, delta-encode
-   within a batch; Avro zigzag varints turn ~6 bytes into 1–2.
+3. **Binary-encode keys** — **PREMISE CORRECTED 2026-07-24**: ETH map keys
+   are already binary (`KeyGenerator.stringAsKey` hex-decodes `0x` strings —
+   always has). What remains: (a) XRP keys are still base58/ASCII — modest,
+   ship with the lever-2 relayout; (b) binary keyBy key is a *design
+   requirement* for the ForSt re-key, else it regresses ~40 B/KV on ETH.
+   See the 2026-07-24 session log.
+4. ~~**Cheapen `ots`**~~ — **CLOSED 2026-07-24**: implemented
+   (`SegmentStorageCodec`, seconds + delta encoding), then reverted by
+   decision. Composition math: the dominant 1-segment dormant tail gains
+   only ~1 byte/KV (~1.5%), weighted total ~5–6% of ETH state — not worth a
+   permanent whole-second-timestamp format invariant (ICP is ns-native
+   upstream) plus carry-cost through the ForSt Phase-B restructure. See the
+   session log; trivially re-appliable if the step-1 readout contradicts the
+   estimate.
 5. **RocksDB tuning pass** — ZSTD bottom levels, partitioned index/filters,
    verify incremental checkpoints. One hour of config review, not more.
 
@@ -348,6 +358,144 @@ tests the dormant-tail premise on ETH.
   vs ETH itself).
 
 ## Session log
+
+### 2026-07-24 (cont. 2) — ForSt project-health check (Yordan's "is ForSt abandoned?" question)
+
+Yordan noticed https://github.com/ververica/ForSt/ looks abandoned and asked
+whether the only async-capable backend is in fact inactive. Verified
+2026-07-24 — the concern conflates two layers:
+
+- **The state backend is actively developed inside apache/flink.**
+  `flink-statebackend-forst` releases track every Flink release through
+  May 2026 (2.2.1/2.1.2/2.0.2); latest module commit 2026-07-17
+  (FLINK-40157, MapState putAll serialization fix, by Zakelly). The async
+  execution model (FLIP-425), State V2 API, remote file cache, and
+  checkpoint fast-duplication are all Java code there, not in the C++ fork.
+- **ververica/ForSt is the thin C++ layer** (RocksDB fork: remote-FS `Env`
+  over JNI + small primitives). JNI releases: 0.1.0-beta (2024-04) →
+  0.1.8 (2025-03); Flink 2.3 and master both pin exactly `forstjni 0.1.8` —
+  nothing to release since. Same quiet-vendored-fork pattern as FRocksDB,
+  which has backed the RocksDB backend for ~8 years. Jan-2026 commits are
+  README trademark cleanup, not a death rattle.
+- **Legitimate residual risks (sharpen migration-plan risk #2, don't change
+  direction):** single-vendor C++ fork outside ASF governance (bus factor);
+  RocksDB baseline frozen (no rebase activity); a native-layer bug found in
+  our benchmark would wait on a Ververica release cycle. Mitigations are
+  exactly the plan's existing ones: Phase-0 spikes, Phase-A canary, pinned
+  versions, per-operator V1-on-local fallback.
+
+### 2026-07-24 (cont.) — lever 4 (cheapen ots) implemented, reviewed, REVERTED by decision
+
+Implemented and fully working (`SegmentStorageCodec`: ots stored in seconds +
+(nonce, ots) delta-encoded vs the previous segment within each batch, wired
+into the four `StackChangesState` accessors, round-trip/guard/size tests, all
+green), then **reverted** after Yordan questioned the cost/benefit and a
+composition re-review agreed with him:
+
+- **Gains are single-digit.** The dominant tail (1-segment dormant
+  addresses, ~80% of ~200M live ETH addresses) gains ~1 byte per ~65 B KV
+  (~1.5%) — delta encoding does nothing for a first segment, only ms→s does.
+  Active 6-segment addresses gain ~12%; burn-class whales ~40% of their
+  segment bytes but they are ~100–300 MB fleet-wide. Weighted: **~5–6% of
+  ETH stacks state** — vs the structural 30–40%+ of lever 2 + clearing.
+  Insight 1 said it upfront: constant factors on the dormant axis don't pay.
+- **Costs are permanent.** Stored state stops being literal (state-processor
+  readout, rebuild tooling, savepoint debugging all need the codec); it bakes
+  a "whole-second timestamps forever, all account-model chains" invariant
+  into the state format (ICP is ns-native upstream — one extractor schema
+  change from a runtime `require` failure); the ForSt Phase-B restructure
+  would have to port it; golden-test timestamps had to be scaled ×1000,
+  denting `stack_fold.py` vector correspondence.
+- Re-appliable cheaply if the step-1 readout shows segment bytes matter more
+  than estimated: the design and pitfalls are all recorded here (the "delta
+  only, no ms→s division" variant avoids the timestamp invariant at ~2/3 of
+  the gain).
+
+**Kept:** the stale-comment fix in `ComputeAccountStackChangesTimeWindow`
+("we encode Strings as ASCII bytes" → KeyGenerator hex-decode reality; the
+lever-3 finding). 107/107 tests pass after the revert.
+
+Levers 1–4 are now all resolved (1 rejected, 2+clearing shipped to the
+branch, 3 reduced to design constraints, 4 rejected on review). Lever 5
+(RocksDB tuning) is moot if ForSt proceeds — **the current-architecture
+track is wrapped up**; next is the async/ForSt feasibility evaluation
+(Phase 0 spikes in
+[forst-async-migration-plan.md](./forst-async-migration-plan.md)).
+
+### 2026-07-24 — lever 3 (binary keys) evaluated: premise wrong for ETH; plan split into 3a/3b/3c
+
+**Premise correction.** The lever assumed ETH addresses sit in state keys as
+42-byte ASCII hex. False: `KeyGenerator.stringAsKey`
+(`common/store/KeyGenerator.scala:25`) hex-decodes any `0x`-prefixed string —
+and has since the function was introduced (pre-Scala-2.13 history);
+`KeyGeneratorTest` locks it in. So today's MapState user keys are already
+binary: ERC-20 head KV key = 20 B contract + 20 B address; ETH-native =
+20 B address + `"ETH"` 3 B. **There is no standalone ETH win — that part of
+lever 3 is closed.** (The comment at
+`ComputeAccountStackChangesTimeWindow.scala:130` — "We encode the Strings as
+ASCII bytes" — is stale/misleading and should be fixed on the next touch.)
+
+Where ASCII (and other key fat) actually remains — three sub-items:
+
+**3a. XRP stacks keys are still ASCII (real, modest — ship with the lever-2
+relayout).** `XRPStacks` keys state by `(issuerCurrency, address)` through the
+same `KeyGenerator`; neither part starts with `0x`, so both stay ASCII:
+address = base58 r-address (~33–34 B), contract = `"XRP"` (3 B) for native or
+`issuer + "/" + currency` (~38–72 B) for IOUs. The codec already exists in the
+repo and is prod-proven in the XRP balances jobs:
+`xrp.serializeAddressWithType` (`xrp/package.scala:96`) = 1 tag byte +
+`NumberBaseUtils` base58 decode (~25 B incl. version+checksum; 21 B if the
+4-byte checksum is stripped — fine since stacks never decodes keys back).
+Plan:
+- Introduce a per-job address codec on the stacks key path (default =
+  current `KeyGenerator` behavior, so ETH jobs are untouched byte-for-byte;
+  `XRPStacks` passes the base58 codec). `HandlerOneAccountChange` builds all
+  keys via `KeyGenerator.keyFor` — one seam to parameterize.
+- Encode IOU contracts structurally too: tag + decoded issuer (20 B) +
+  currency bytes (XRP currency codes are 3-ASCII or 40-hex — the hex form
+  also halves).
+- Estimated: native head KV key 37 B → ~25–29 B (−25–30%); IOU pair keys
+  ~72 B → ~46 B. Share of total XRP state = the step-1 readout's
+  key-vs-value split; dormant 1–2-segment addresses have small values, so
+  key bytes are likely 30–40% of head-KV bytes there.
+- Bonus: tag bytes + fixed-length decoded forms remove a latent injectivity
+  wart — today's `keyFor` concatenates variable-length ASCII parts with no
+  separator, and `getIssuerCurrency` can produce `"/CUR"` for a missing
+  issuer.
+- Migration: changes every stored map key → same savepoint break as lever 2,
+  so it must ride the same XRP relayout/backfill (one migration, not two).
+  Output is unchanged (state keys never leave the operator), so
+  `compare_xrp_experimental.py` should show byte-identical output.
+- Test watch-out: leading `'r'` in the XRP alphabet is digit 0 —
+  leading-zero handling in `NumberBaseUtils` round-trips must be covered
+  (prod-proven in balances, but stacks tests should pin it anyway).
+
+**3b. FlatMap variant's Flink key is ASCII (real, but don't do standalone).**
+`ETHAccountChangesExact` keys by contract `String` — every RocksDB entry of
+the ERC-20 exact jobs carries ~43 B of ASCII contract in its serialized Flink
+key (the window jobs carry only a 4 B `Int`). Subsumed by the ForSt re-key
+(3c); a standalone fix would be a throwaway state migration.
+
+**3c. The real ETH payoff: binary keyBy key as a design REQUIREMENT of the
+ForSt re-key (forst-async-migration Phase B).** After re-keying by true
+`(contract, address)`, the Flink key enters every RocksDB/ForSt state key. A
+naive `(String, String)` key costs ~86 B ASCII + length prefixes per KV —
+i.e. the re-key would *regress* ETH key bytes by ~40–45 B/KV vs today
+(4 B Int + binary map key). Plan: key by a dedicated binary key type —
+e.g. `AccountKey(bytes: ArraySeq[Byte])` (hex-decoded contract+address;
+`ArraySeq` gives deterministic MurmurHash3 value semantics for key-group
+assignment) with a compact custom `TypeSerializer`. Then the map-state user
+keys drop `(contract, address)` entirely: head becomes `ValueState`
+(zero user-key bytes), overflow keyed by `Long` batchIndex only — roughly
+byte-neutral vs today instead of a regression, with Insight 7's progress
+state folded in. Action: add this as an explicit design point in
+[forst-async-migration-plan.md](./forst-async-migration-plan.md) Phase B.
+
+**Net effect on the lever:** no quick standalone win exists. 3a is the only
+near-term item (piggybacks on the lever-2 migration); 3c is deferred into the
+ForSt migration where it prevents a regression rather than harvesting a gain.
+The step-1 savepoint readout still prices 3a exactly (key-vs-value byte
+split per state).
 
 ### 2026-07-23 — lever 1 implemented then REVERTED by decision; lever 2 implemented
 
