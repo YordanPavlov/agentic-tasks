@@ -359,6 +359,83 @@ tests the dormant-tail premise on ETH.
 
 ## Session log
 
+### 2026-07-28 — ETHAccountChanges migrated to async State V2 (branch `ethStacksAsyncState`, uncommitted, for review)
+
+First implementation pass of the ForSt plan's Phase B3 core, scoped to the
+`ETHAccountChanges` job and deliberately **output-preserving** (no re-keying, no
+bucketing — see deviations below). Shape = the plan's Path P + the
+prefetch/compute/commit restructure from the "stacks handler async restructure"
+section:
+
+- **Trait split:** `StackChangesState` is now backend-agnostic (abstract
+  get/put/remove head + segment-array ops, shared Avro encode/decode helpers in
+  its companion); the V1 MapState plumbing moved to a new `MapStackChangesState`
+  sub-trait (window + flatmap variants unchanged behind it; the handler and all
+  golden tests untouched).
+- **`StackWorkingBuffer`** (new, `job/helpers`): per-(contract,address)
+  in-memory `StackChangesState` — loaded head + loaded overflow batches +
+  write overlay (read-your-writes), raises `BatchNotLoadedException` when a pop
+  descends into an unloaded batch, exposes pending head/batch writes for the
+  async commit. Reuses the exact encode/decode path → byte-identical stored
+  state.
+- **`ComputeAccountStackChangesProcess`** (new): async twin of the window
+  variant. v2 MapStates with the same names/types ("account-head",
+  "account-change-store") + a per-block record buffer MapState; event-time
+  timer per block timestamp reproduces the 1 ms-window firing; on fire:
+  `groupAndCompress` verbatim → per-address head prefetch fan-out
+  (`StateFutureUtils.combineAll`, order-preserving) → synchronous handler runs
+  against the buffer → on `BatchNotLoaded`, fetch all batches below the loaded
+  top and re-run that address from scratch (deterministic, max 2 rounds) →
+  emit in the window variant's exact order → async fan-out commit + emptied-
+  address head removal. Late records dropped via `ts <= currentWatermark`
+  (same rule as window lateness).
+- **Job wiring:** first stage `keyBy(hash%100).enableAsyncState().process(...)`;
+  sort stage keeps its window with `WindowedStream.enableAsyncState()` (Path W —
+  stateless user function; verified `AsyncWindowOperator` exists in 2.3).
+- **Handler:** only change is key derivation moved to companion helpers
+  (`headStateKey`/`overflowStateKey`) so the driver prefetches exactly the
+  handler's keys.
+
+**Verification:** new end-to-end equivalence test
+(`ComputeAccountStackChangesProcessTest`) runs both operators on a real local
+Flink (RocksDB backend; async API served via `AsyncKeyedStateBackendAdaptor`)
+and asserts record-for-record equality — scenario covers compression, pop
+remainder, emptied-address clearing + nonce restart, same-block empty/refill
+continuity, per-contract separation, and a 7-segment 3-batch deep pop that
+provably exercises the BatchNotLoaded → reload → re-run round. Plus
+`StackWorkingBufferTest` (7 cases). Full suite: 116/116 green, incl.
+`AllJobGraphsBuildTest` (async graph translation works for both stages).
+
+**Findings settling plan questions:**
+- Phase-0 spike (b) is effectively answered: KeyedProcessFunction + event-time
+  timers + v2 async state works, including same-key ordering across
+  timer-driven flushes (D/C clearing-then-rebirth would corrupt otherwise).
+- V2 API on non-async backends works through the runtime's
+  `AsyncKeyedStateBackendAdaptor` (futures complete inline) — so the operator
+  migration is decoupled from the ForSt backend flip (Phase A) and testable on
+  RocksDB.
+- `KeyedStream.enableAsyncState()` + `WindowedStream.enableAsyncState()` and
+  v2 descriptors (which accept `Class` directly) confirmed on Flink 2.3.0 from
+  the shipped jars; `RuntimeContext` has the v2 accessor overloads.
+
+**Deviations from the full B3 scope (deferred deliberately):**
+- No re-keying to binary `(contract, address)` (plan's lever-3c requirement)
+  and no odt-bucketing re-introduction (`788c0ded`) — this pass keeps today's
+  coarse hash%100 keying and byte-identical output so equivalence is provable;
+  the re-key + bucketing change output/state layout and belong to a follow-up
+  step with its own validation.
+- Size-adaptive round-1 prefetch (topIdx ≤ K) not implemented — round 1 loads
+  the head only; the rare deep pop pays one extra async round (re-run). Cheap
+  follow-up optimization if profiling justifies it.
+- `ETHAccountChangesExact` (flatmap variant) and `XRPStacks` still on V1 sync —
+  separate phases in the plan.
+- Backend still `rocksdb` in `package.scala` — the ForSt flip is Phase A,
+  intentionally not on this branch.
+
+Per-record RMW of the block buffer (get+put of a growing list per record) is
+the one knowingly-accepted inefficiency vs the window operator's internal
+namespaced ListState append; fine at hash%100 granularity, revisit if hot.
+
 ### 2026-07-24 (cont. 2) — ForSt project-health check (Yordan's "is ForSt abandoned?" question)
 
 Yordan noticed https://github.com/ververica/ForSt/ looks abandoned and asked
