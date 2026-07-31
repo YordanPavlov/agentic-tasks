@@ -359,6 +359,83 @@ tests the dormant-tail premise on ETH.
 
 ## Session log
 
+### 2026-07-31 — eth-stacks-v12 ForSt test deploy LIVE on hprod; baseline readings for later comparison
+
+First production deployment of the ForSt + async-V2 stack (plan Phase A+B3
+combined, ETH job only). Deploy chain:
+
+- **etherbi-flink `ethStacksAsyncState`** through `f51f640b` ("Set Forst state
+  backend" — `package.scala` flips `state.backend` rocksdb→forst; set in code
+  via `env.configure`, which outranks the chart's `state.backend.type:
+  rocksdb` line, empirically proven by the old chart's `filesystem` setting
+  never winning). Branch also gained a Dockerfile fix (below). Note: commits
+  `3a7d675c`..`c2c7ec99` (compacted keys, re-keying per (contract,address) via
+  binary `AccountKey`) shipped in this image — the 07-28 entry's "no re-keying"
+  deviation no longer holds.
+- **devops `ethStacksForst`** (pushed): new
+  `hprod/k8s-apps/flink-jobs-operator/eth/eth-stacks-v12/` (operator chart;
+  topics `eth_stacks_v12.clickhouse-{0,1,2}`, source `eth_transfers_v3`, TM
+  3×3 slots ×16g, parallelism 9, `pipeline.max-parallelism` left to Flink's
+  auto-derivation = 128 at this size, Yordan's call) + two fleet-template
+  changes: ForSt metrics trio alongside the rocksdb trio, and
+  `state.backend.forst.cache.size-based-limit: "100g"` as a guarded template
+  default (unset, ForSt's only bound is "evict at <256MB free node disk" —
+  protects ForSt from a full disk, not the node from ForSt; TMs sit on
+  `emptyDir`, no PVC/limit anywhere in the flink fleet).
+
+**First deploy crashed** — `NoSuchMethodError:
+scala.collection.Iterable.map(Function1)` in `Main.<clinit>`. Root cause: the
+stock `apache/flink:2.3.0` image ships `lib/flink-scala_2.12` which BUNDLES
+the Scala 2.12 stdlib; `scala.*` is parent-first, so it shadowed our
+`scala-library-2.13.16` → 2.13-only signatures vanished. This was the
+flinkUpgrade task's "watch first deploy" risk landing. Diagnostic path:
+`kubectl logs` on the JM → `Classpath:` banner → spot the duplicate stdlib.
+Fix: `rm $FLINK_HOME/lib/flink-scala_2.12-*.jar` in the Dockerfile (upstream
+"bring your own Scala" guidance; nothing else needs it). Affects EVERY job
+that moves to the 2.3 image, not just ForSt. Discussed but deferred: an
+in-image smoke test (`flink run --target local` + a `--buildGraphOnly` mode)
+that would have caught this in CI — sbt tests are structurally blind to
+image-classpath composition.
+
+**Baseline readings, ~10 min after start (2026-07-31 ~11:28 UTC, job
+`8294e141d423608ff2fe355753ce593f`, from-genesis Kafka replay):**
+
+- Job RUNNING, 0 pod restarts, all 9 `Create Stack Changes-ETH` subtasks up.
+- **Disaggregation confirmed**: TM logs show the async operator
+  (`op_AsyncKeyedProcessOperator_b5c69ee7…`) with `remoteForStPath:
+  s3://flink-checkpoints-production-eth-stacks-v12/checkpoints/ha/<jobId>/shared/op_…/db`
+  and a local cache dir under `/tmp/tm_<pod>/tmp/<jobId>/op_…/db`. The
+  `StreamMap` and sort-stage `WindowOperator` instances show `remoteJobPath:
+  null` (local-only, as ForSt does for non-async operators).
+- Checkpoints: #1 69MB/1.1s, #2 299MB/73s (initial surge), then steady
+  ~340MB in 7–9s (#3, #4).
+- Throughput: ~24.9k records/s out of the stack-changes operator (5m rate).
+- ForSt cache: 25/44/83 MiB used per TM, **100% hit rate, 0 evictions** —
+  three orders of magnitude under the 100g cap; consistent with the CH-spike
+  "working set is megabytes" prediction (backfill will grow it).
+- Fleet context for comparison: node disks 14–23% full (7.1TiB each);
+  RocksDB per-TM SST where exported: polygon-stacks 38.4GiB,
+  avax-erc20-stacks 15.3GiB, xrp-stacks 12.5GiB (eth-stacks-v11/btc-v12
+  predate the metric config and export nothing).
+
+**Metrics for the later comparison pass** (hprod prometheus
+`prometheus-hetzner.production.san:30200`):
+`flink_taskmanager_job_task_operator_forst_fileCache_{usedBytes,hit,miss,lru_evict,lru_loadback,remainingBytes}`;
+checkpoint duration/size (JM log or REST); the per-state
+`…_forst_{estimate-num-keys,estimate-live-data-size,total-sst-files-size}`
+trio was enabled in the template but had produced **no series yet** at
+reading time — re-check; if still absent at next pass, investigate whether
+ForSt native metrics register only after first flush or need different keys.
+
+**Open items:** (a) verify the sort stage actually got the async window
+operator — log says plain `WindowOperator`, so `enableAsyncState()` may have
+quietly fallen back to sync (Path W evidence point; harmless here, state is
+one block); (b) output equivalence vs eth-stacks-v11 in CH once backfill
+lands (table_qa-style diff on `eth_stacks_v12.*` topics); (c) cache/checkpoint
+behavior once state reaches 100s of GB — the actual ForSt thesis test;
+(d) exec into a TM (needs rw creds; agent token is read-only) to `du` the
+local dirs if log-level evidence isn't enough.
+
 ### 2026-07-28 — ETHAccountChanges migrated to async State V2 (branch `ethStacksAsyncState`, uncommitted, for review)
 
 First implementation pass of the ForSt plan's Phase B3 core, scoped to the
