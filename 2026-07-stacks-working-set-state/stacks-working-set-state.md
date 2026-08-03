@@ -359,6 +359,98 @@ tests the dormant-tail premise on ETH.
 
 ## Session log
 
+### 2026-08-03 — native memory leak hunt (timer fix REFUTED, pmap forensics done) + savepoint/ops chapter; CONTINUE: read async-instance ForSt LOG from S3
+
+**Where we left off (do this first next session):** find the async ForSt instance's
+info LOG among the UUID-mapped files in
+`s3://flink-checkpoints-production-eth-stacks-v12/checkpoints/ha/8294e141d423608ff2fe355753ce593f/shared/op_AsyncKeyedProcessOperator_b5c69ee72b976d0370e8f6ad9e961726__1_9__attempt_0/db/`
+(`mc cat` the small 31–37KiB UUIDs, e.g. `52d8a4a1…`, `2b2e2209…`, `a9ccfb8e…` — a LOG
+opens with "RocksDB version"/`Options.` lines), then grep
+`write_buffer_manager|block_cache|capacity`. Control group: the SYNC instances
+(StreamMap/WindowOperator) DO write local LOGs at
+`/tmp/tm_<pod>/tmp/<jobId>/op_*/db/*_db_LOG` (path-mangled names — plain `find -name
+LOG` misses them); grep the same there. **Hypothesis to test:** the managed-memory
+wiring (shared write-buffer-manager + ~5.9GB block cache) is not applied to the
+async/disaggregated instances → they run the standalone 8MB-cache default
+(`state.backend.forst.block.cache-size` default 8mb) with unbudgeted native
+allocation ∝ write volume — which would explain everything below.
+
+**Memory leak — established facts:**
+- Two control runs (2026-07-31 + 2026-08-03 09:xx): TM RSS grows linearly
+  2.2–2.75 Gi/h from ~6Gi, no plateau; per-TM skew stable (17/14/12-shaped —
+  whale keys hash to fixed subtasks; growth ∝ per-subtask write volume). k8s
+  limit 32g (limit-factor 2, devops PR #5821); OOMKill horizon ~10–14h. No
+  slowdown before the cliff: anon memory, no swap, `memory.max` is a tripwire.
+- Flink accounting is healthy throughout: heap 1–3.3Gi (capped), managed pinned
+  at exactly 5.5Gi (=0.4 budget), network 1Gi. The growth is native, OUTSIDE
+  all Flink budgets.
+- **Timer hypothesis REFUTED:** `state.backend.forst.timer-service.factory:
+  HEAP` (verified loaded, run of 11:26) did not change the slope (3.0–3.9 Gi/h;
+  possibly higher only because backfill was in a denser chain region). Heap
+  stayed 0.6–2.1Gi — suspicion the factory may not even apply to async-state
+  operators. Override left in place (harmless, matches FLINK-17800-era fleet
+  stance).
+- **pmap/smaps forensics** (TM-1-4 @ 18.7GB, two snapshots 20min apart,
+  +1.06Gi): 99.9% `Anonymous`, `Pss_File` 16MB (no page cache/mmap involvement;
+  ForSt does NOT mmap local SSTs). JVM heap region flat (+10MB, 3.6Gi resident
+  of 5.6 reserved). Entire delta in jemalloc large extents: one NEW extent
+  +756MB + one filling +516MB while two old 2.3–2.5Gi extents SHRANK ~230MB →
+  churn with net accumulation; freeing works but is outpaced ~3Gi/h. Not
+  fragmentation-only, not JVM, not files: native malloc through jemalloc
+  (image preloads it; TMs run via docker-entrypoint.sh).
+- **ForSt native metrics DO NOT EXPORT in 2.3** — all `state.backend.forst.
+  metrics.*` keys (incl. the sst trio enabled since day 1) are accepted but
+  produce no prometheus series; only `forst_fileCache_{usedBytes,hit,miss,
+  lru_evict,lru_loadback,remainingBytes}` exist. Observability gap for the
+  whole migration; candidate upstream report. The 5 extra gauges
+  (mem-tables/block-cache/pinned/capacity/table-readers) stay in values for
+  future versions.
+- Flink disables RocksDB-style periodic stats dumps (no DUMPING STATS in any
+  LOG), so LOG startup options dump is the native-side evidence.
+- ForSt fileCache: 25–83MiB used, 100% hit, 0 evictions (cache is NOT the
+  leak); S3 shared-file reuse verified across 3 restarts (Jul-31 SSTs still
+  referenced Aug-3 — claim/fast-duplicate model works).
+- Suspect ranking: (1) managed-memory budget not wired into async instances
+  (8MB default cache + unbudgeted memtables/readers), (2) pinned block-cache
+  overrun ("zombie cache"), (3) table-reader memory ∝ SST count, (4) JNI write
+  path outside ForSt accounting.
+
+**Savepoint chapter (all fixed on devops `ethStacksForst`):**
+- ForSt REJECTS CANONICAL savepoints (`checkForcedFullSnapshotSupport` →
+  IllegalStateException → task failure → job restart). Checkpoints (native
+  incremental) were never affected — 36+ fine before the first savepoint
+  request. Fix: `kubernetes.operator.savepoint.format.type: NATIVE` (per-job
+  values; fleet-template candidate for the ForSt era). Consequence for ADR:
+  native savepoints are backend-locked → no canonical cross-backend export;
+  replay-from-Kafka is the escape hatch. ForSt native savepoints are plausibly
+  CHEAP (S3 server-side copy) — unverified, measure when one fires (~Aug 30).
+- Root cause of the surprise trigger: the chart's periodic-savepoint cron was
+  derived from `.Release.Time` ("deploy day − 1") → every `helm upgrade`
+  re-rendered YESTERDAY into the schedule; operator cron semantics are a
+  freshness contract with catch-up → immediate savepoint after every upgrade.
+  Fixed: helper now emits plain `30d` — operator anchors the first interval to
+  the CR's immutable creationTimestamp (verified in operator source,
+  SnapshotTriggerTimestampStore: max(creationTimestamp, last trigger)) →
+  "first savepoint ~1 month after first deploy" preserved, upgrade-immune.
+  eth-stacks-v12 next periodic: ~Aug 30. Fleet jobs >30d old with no savepoint
+  get ONE catch-up at their next upgrade.
+- Helm 4 SSA field-ownership: `make suspend/resume` (kubectl patches) steal
+  `.spec.job.state` from helm → later plain `install` fails with a
+  field-manager conflict. New `make reconfigure` target (= install +
+  `--force-conflicts`, Helm 4) is the go-to for rolling out changed settings;
+  plain `install` deliberately stays strict. Also: `restore_from` on an
+  EXISTING FlinkDeployment is decorative — the operator honors
+  `initialSavepointPath` only on first deploy (or with a savepointRedeployNonce,
+  not wired in our template); `last-state` restores the newest retained
+  checkpoint anyway.
+
+**Ops notes:** agent kubectl token cannot exec or read flinkdeployments CRs
+(pods/logs/PVC/PV fine) — CR-level checks and exec forensics go through
+Yordan. `helm` and `docker` missing in the agent container (helm fetched to
+/tmp ad hoc). ForSt async instances route even their info LOG through the
+file-mapping layer to S3 (UUID names); sync instances write it locally under
+the db dir with a path-mangled filename.
+
 ### 2026-07-31 — eth-stacks-v12 ForSt test deploy LIVE on hprod; baseline readings for later comparison
 
 First production deployment of the ForSt + async-V2 stack (plan Phase A+B3
