@@ -359,6 +359,56 @@ tests the dormant-tail premise on ETH.
 
 ## Session log
 
+### 2026-08-04 (cont.) — ReadOptions leak patch IMPLEMENTED on `ethStacksAsyncState` (uncommitted, awaiting review)
+
+Executed the patch plan from the morning session. All four prep steps done;
+deploy pending review.
+
+- **Step 1 (locate the class) resolved without a pod** — eth-stacks-v12 pods
+  are GONE: the FlinkDeployment was deliberately suspended (operator event
+  `job.state: running -> suspended`, ~10:05 UTC), presumably by Yordan to
+  await the patched image. Verified instead via the flink-dist pom at
+  `release-2.3.0`: `flink-dist` declares `flink-statebackend-forst` as a
+  bundled dependency → the class IS in `lib/flink-dist-2.3.0.jar` (matches
+  the runtime evidence: ForSt runs with no forst jar in lib/ or opt/).
+  `flink-dist` is NOT on Maven Central — pom + runtime evidence is the
+  verification; the Dockerfile guard makes the build fail loudly if wrong.
+- **The patch** (`flink-patches/ForStGeneralMultiGetOperation.java`): pristine
+  `release-2.3.0` copy + one-line change — `try (ReadOptions readOptions =
+  new ReadOptions())` in `process()`'s executor lambda (covers both early
+  `return`s, exceptions, and normal exit; resource closes before the existing
+  `finally`). Header comment marks it as a patched copy; README.md documents
+  evidence, safety argument, and the version-bump procedure.
+- **Dockerfile step** (blockprocessor stage, after apt, before `USER flink`):
+  guard `jar tf | grep -q` that the class exists in flink-dist (a future
+  bump that relocates it fails the build), `javac --release 21 -cp
+  flink-dist` (jdk-headless already installed there), `jar uf` the compiled
+  class(es) back, `chown flink:flink` the jar. Comment-inside-RUN pattern
+  already precedented in this Dockerfile (Docker strips `#` lines before
+  joining continuations).
+- **Validated locally:** test-compile against
+  `flink-statebackend-forst-2.3.0.jar` + `forstjni-0.1.8.jar` from Maven →
+  clean, exactly ONE class file (lambdas are invokedynamic, no inner
+  classes); the Dockerfile glob `ForStGeneralMultiGetOperation*.class`
+  covers it either way.
+- **Item 5b (sweep) DONE:** grepped the full `flink-statebackend-forst`
+  sources jar for `new ReadOptions|new WriteOptions|new Options(` — all
+  other sites are lifecycle-managed (`ForStDBWriteBatchWrapper` →
+  `toClose`; `ForStResourceContainer.get{Read,Write}Options` →
+  `handlesToClose`; `ForStIncrementalRestoreOperation` → `IOUtils.closeQuietly`
+  in `close()`). The multiGet site is the ONLY leak of this class.
+- **Deliberately NOT included:** the stats-dump
+  `ConfigurableForStOptionsFactory` rider — image change kept minimal so the
+  post-deploy slope change is attributable to the fix alone (per item 5d).
+
+**Next:** Yordan reviews → commit on `ethStacksAsyncState` → CI image build →
+resume/reconfigure eth-stacks-v12 on the new image → verify: TM RSS slope
+(was 2.2–3.9 Gi/h) and re-run `symdiff.py` jeprof diff —
+`Java_org_forstdb_ReadOptions_newReadOptions` must go flat; also re-check
+whether the block-cache component plateaus at the 5.5 Gi budget (item 5a).
+Then file the upstream JIRA with the profile evidence (item 5c) and update
+flink-patches/README.md with the FLINK-XXXXX id.
+
 ### 2026-08-04 — leak-hunt round 2 settings LIVE (jemalloc prof + local ForSt LOGs); shared-cache hypothesis REFUTED at runtime; S3A pool fix
 
 Shipped via `make reconfigure` on devops `ethStacksForst` (values of eth-stacks-v12):
