@@ -359,6 +359,123 @@ tests the dormant-tail premise on ETH.
 
 ## Session log
 
+### 2026-08-04 — leak-hunt round 2 settings LIVE (jemalloc prof + local ForSt LOGs); shared-cache hypothesis REFUTED at runtime; S3A pool fix
+
+Shipped via `make reconfigure` on devops `ethStacksForst` (values of eth-stacks-v12):
+
+- `state.backend.forst.log.dir: /var/log/flink` (+ max-file-size 25mb, file-num
+  10) — relocate every instance's ForSt info LOG (incl. the async one that
+  otherwise goes to S3 under UUID names) to the tmp-logs emptyDir. VERIFY on a
+  TM: `ls /var/log/flink` (agent token can't exec).
+- `containerized.taskmanager.env.MALLOC_CONF: prof:true,prof_prefix:/tmp/jeprof,
+  lg_prof_sample:21,lg_prof_interval:32` — jemalloc allocation profiling, one
+  .heap dump per ~4GiB cumulative allocation. The `containerized.taskmanager.
+  env.*` prefix DOES reach TM pod specs under the operator (verified in pod
+  env). No "Invalid conf pair" in any container log → prof is compiled into the
+  image's jemalloc (also verified option strings in Debian's libjemalloc2).
+  VERIFY dumps appear: `ls /tmp/jeprof*` on a TM (~1–2h), then
+  `jeprof --text <java> /tmp/jeprof.*.heap` attributes the growth.
+- **Suspect #1 (async instances on standalone 8MB default) REFUTED twice:**
+  (a) bytecode: `createAsyncKeyedStateBackend` calls
+  `allocateSharedCachesIfConfigured` same as sync path (decompiled
+  flink-statebackend-forst-2.3.0); (b) runtime: every instance on every TM logs
+  "Obtained shared ForSt cache of size 1977474552 bytes" = 5.5Gi managed / 3
+  slots. Remaining suspects: pinned/"zombie" block-cache overrun, table-reader
+  memory ∝ SST count, JNI write path outside accounting — the jemalloc profiles
+  discriminate these.
+- **New failure mode found+fixed on the reconfigure recovery:** ForSt cold-cache
+  recovery is an S3 read storm; the shared S3A HTTP pool (default
+  `fs.s3a.connection.maximum: 96`) exhausted → async multiGet failed
+  ("Timeout waiting for connection from pool") → 10-min restart backoff.
+  Fixed: `fs.s3a.connection.maximum: 512`, `fs.s3a.threads.max: 64` in the
+  job values; **fleet-template candidate for all ForSt jobs** (S3 is primary
+  store now, pool was sized for checkpoint-backup traffic). Second reconfigure
+  deployed clean, checkpoints running.
+- Also still pending from 08-03: the periodic native stats dump needs a custom
+  `ConfigurableForStOptionsFactory` in etherbi-flink
+  (`setStatsDumpPeriodSec(300).setDumpMallocStats(true)`) — Flink hard-codes
+  `setStatsDumpPeriodSec(0)`; `state.backend.forst.options-factory` is the only
+  seam. Rides the next image build.
+
+**LEAK FOUND (same day, via the jemalloc profiles):** exec works for the agent
+now; jeprof dumps analyzed offline (image lacks binutils — heap files + java,
+libjvm, libjemalloc, libforstjni pulled via `kubectl cp`, symbolized with a
+custom script `scratchpad/jeprof/symdiff.py`, jeprof-style heap_v2 sample
+scaling at 2MiB rate; async ForSt LOG did NOT relocate to /var/log/flink —
+only sync instances did, file-mapping layer wins).
+
+Steady-state window on TM-1 (07:58→08:10, 12 min, post-warmup): +1180 MiB
+live native, two components:
+
+1. **CONFIRMED LEAK — `ReadOptions` never closed in the async multiGet path.**
+   +530 MiB/12 min live in `Java_org_forstdb_ReadOptions_newReadOptions`.
+   `ForStGeneralMultiGetOperation.process` creates `new ReadOptions()` per
+   executed batch and no path closes it — verified in the 2.3.0 bytecode AND
+   in apache/flink **master** source (still unfixed upstream as of
+   2026-08-04). Leak rate ∝ read batches ⇒ matches "growth ∝ per-subtask
+   volume" skew from the control runs. **Upstream JIRA candidate + local
+   image patch candidate** (try-with-resources; note the sync backend shares
+   one long-lived ReadOptions — precedent that closing/sharing is safe;
+   multiGetAsList returns byte[] copies, nothing stays pinned).
+2. **Block-data/cache stacks** (+723 MiB/12 min: UncompressBlockData →
+   MaybeReadBlockAndLoadToCache → LRU insert under BlockBasedTable::Get):
+   cumulative ~4–4.5 GiB since restart — still consistent with legitimate
+   fill toward the 5.5 GiB/TM shared cache budget (shared cache IS wired:
+   "Obtained shared ForSt cache of size 1977474552" per slot). VERIFY it
+   plateaus: re-diff dumps a few hours in; if it grows past ~6 GiB, that's
+   leak #2 ("zombie cache" — Confluent saw exactly this pattern with RocksDB).
+
+Earlier window (07:28→07:45) grew +2975 MiB — warmup-dominated, don't use it
+for slope estimates. jeprof text mode mis-attributes everything to
+`malloc_stats_print` (Debian libjemalloc has no .symtab; jeprof picks nearest
+dynamic symbol and fails to prune allocator frames) — use symdiff.py.
+
+**NEXT SESSION — patch plan for the ReadOptions leak (decided: fix locally
+first, file upstream JIRA after the fix validates):**
+
+1. **Locate the class in the image** (blocking first step). It is NOT a
+   separate jar: `/opt/flink/lib` and `/opt/flink/opt` have no `*forst*` jar,
+   and etherbi-flink's build.sbt has no forst dependency (only
+   `flink-statebackend-rocksdb % provided`). Almost certainly bundled in
+   `/opt/flink/lib/flink-dist-2.3.0.jar` — verify on a pod:
+   `unzip -l /opt/flink/lib/flink-dist-2.3.0.jar | grep ForStGeneralMultiGet`.
+   (If it unexpectedly turns out to load from usrlib, the patch is simpler:
+   override via our assembly — parent-first only wins when the parent HAS the
+   class.)
+2. **The fix**: in `ForStGeneralMultiGetOperation.process`'s executor lambda
+   (flink tag `release-2.3.0`,
+   `flink-state-backends/flink-statebackend-forst/src/main/java/org/apache/flink/state/forst/ForStGeneralMultiGetOperation.java`),
+   wrap `new ReadOptions()` in try-with-resources spanning the whole lambda
+   body. Safe: `multiGetAsList` is synchronous within the lambda and returns
+   `byte[]` copies (nothing stays pinned); all early `return`s are covered by
+   try-with-resources; the sync backend shares one long-lived ReadOptions as
+   precedent. Same fix confirmed still missing on apache/flink master
+   (2026-08-04), so the patched file ports forward.
+3. **Injection into the image** (Dockerfile of etherbi-flink, blockprocessor
+   stage): keep the patched `.java` in-repo (e.g. `flink-patches/`); add a
+   build step that compiles it against the dist jar
+   (`javac -cp $FLINK_HOME/lib/flink-dist-2.3.0.jar --release 21`) and
+   injects the resulting `.class` files (incl. the lambda's inner classes if
+   any) back into the same jar (`jar uf`). Deterministic, survives base-image
+   digests, affects every job on the 2.3 image (desired).
+4. **Verify after deploy**: RSS slope on the eth-stacks-v12 TMs (was
+   ~2.6 GiB/h from ReadOptions alone at current volume) + re-run the
+   symdiff.py jeprof diff — `Java_org_forstdb_ReadOptions_newReadOptions`
+   must go flat. Tooling saved as [symdiff.py](./symdiff.py) in this task dir
+   (usage: `python3 symdiff.py <base.heap> <new.heap> <libroot>` where libroot
+   mirrors the pod's lib paths — needs local binutils; the flink image has
+   jeprof but no objdump).
+5. **Also settle**: (a) does the block-data/cache component plateau at the
+   5.5 GiB budget (diff two dumps hours apart; if it keeps growing → second
+   bug, "zombie cache"); (b) sweep remaining forst classes for other
+   per-call `ReadOptions`/`WriteOptions` constructions without close
+   (targeted checks so far: ForStIterateOperation and ForStWriteBatchOperation
+   construct none; full sweep interrupted); (c) upstream JIRA with the
+   profile evidence once the fix validates; (d) optional rider on the same
+   image build: the stats-dump `ConfigurableForStOptionsFactory` — but
+   consider keeping the image change minimal so the slope change is
+   attributable to the fix alone.
+
 ### 2026-08-03 — native memory leak hunt (timer fix REFUTED, pmap forensics done) + savepoint/ops chapter; CONTINUE: read async-instance ForSt LOG from S3
 
 **Where we left off (do this first next session):** find the async ForSt instance's
