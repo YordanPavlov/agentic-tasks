@@ -359,6 +359,29 @@ tests the dormant-tail premise on ETH.
 
 ## Session log
 
+### 2026-08-05 (cont.) — 10g cache cap deployed fleet-wide (template default), post-redeploy review clean
+
+Yordan's call: 10g goes into the fleet template (`flink-job-template`
+guarded default, was 100g) rather than per-job values — defaults over custom.
+Same commit syncs eth-stacks-v12 values with live state: image → `a6dbcf9d`,
+`fs.s3a.connection.maximum: 512`/`threads.max: 64` committed (were live-only
+via reconfigure, never in git); DROPPED `forst.log.*` (half-working
+diagnostic, async instances ignored it anyway) and `MALLOC_CONF` (jeprof
+profiling off — leak validation evidence already collected).
+
+Redeployed ~14:15 UTC (new pods eth-stacks-v12-taskmanager-1-{1,2,3}, still
+all on vidar). Review at +25 min: config verified in pod spec/ConfigMap
+(10g + s3a present, MALLOC_CONF gone); recovery clean, no S3A pool timeouts
+(512 pool held); checkpoints 953–962 completing steadily (~3.4G, 9–20 s,
+2.5 min cadence); caches rebuilding from empty (1.0–1.6 G/subtask), 0
+evictions yet, hit ratio 1.0; RSS flat 9.2–10 G; throughput unchanged
+(~10–11k rec/s both sides of the redeploy — the 07-31 24.9k baseline was a
+sparse chain region, not comparable). Slightly lower CPU post-redeploy =
+expected transient (compaction backlog reset on restart + prof sampling
+gone). **Eviction first-fire ETA ~10 h** at ~0.9 G/h per cache — watch
+lru_evict > 0, hit ratio, records/s, checkpoint duration when caches reach
+10 g.
+
 ### 2026-08-05 — leak fix VALIDATED after 19h (RSS flat); Grafana "sawtooth" diagnosed as page-cache accounting, not a leak
 
 Patched image (`a6dbcf9d`, the ReadOptions try-with-resources fix) resumed
