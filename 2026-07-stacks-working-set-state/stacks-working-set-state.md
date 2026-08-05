@@ -359,6 +359,59 @@ tests the dormant-tail premise on ETH.
 
 ## Session log
 
+### 2026-08-05 — leak fix VALIDATED after 19h (RSS flat); Grafana "sawtooth" diagnosed as page-cache accounting, not a leak
+
+Patched image (`a6dbcf9d`, the ReadOptions try-with-resources fix) resumed
+~2026-08-04 18:00 UTC; TM pods `eth-stacks-v12-taskmanager-1-{4,5,6}` (all on
+node vidar), 0 container restarts, 1 Flink job restart in 24h (= the resume
+itself).
+
+**Leak fix validated.** `container_memory_rss` per TM: 10.7 → 11.1 GiB over
+19 h ≈ **~20 MiB/h**, vs 2.2–3.9 GiB/h before the patch (100–200× better).
+This also answers item 5a as far as RSS can: total native is flat, so the
+block-cache component has plateaued within the managed budget. The jeprof
+re-diff (ReadOptions symbol must be flat) is still worth one confirmation
+pass but is no longer load-bearing.
+
+**The 10G→21G→10G sawtooth (3h flat, 2–3h rise, cliff, ~5–6h period) is a
+metric artifact, not process memory.** Decomposition per TM over 24h
+(cadvisor, 10-min step):
+
+- `container_memory_rss`: **flat ~10.7–11.1 G** the whole time.
+- `container_memory_cache` (page cache): ~15.5–17.5 G, roughly flat.
+- `container_memory_usage_bytes` (rss+cache): ~27–29 G, roughly flat —
+  pinned just under the 32 G limit; kernel memcg reclaim continuously evicts
+  file pages to make room (normal for heavy file I/O in a limited cgroup).
+- `container_memory_working_set_bytes` (= usage − inactive_file): **this is
+  the sawtooth** — 11.4 → ~24 G ramps as file pages get re-referenced
+  (ForSt local-cache SST reads/compaction re-reads promote pages
+  inactive→active), then a cliff back to 11.4 when reclaim mass-deactivates
+  the active file list. Roughly synchronized across the 3 TMs (same work,
+  same node). Drops observed ~23:08, ~04:10–04:30, ~09:10–09:30 UTC.
+
+The Grafana panel plots working_set (the standard k8s "memory usage"
+metric). No OOM risk from this pattern: the anon component is flat and the
+file pages are reclaimable — usage already plateaus below the limit. If the
+panel noise bothers, plot `container_memory_rss` for leak-watching.
+
+**Real item to watch instead — ForSt local file cache growth.** Each async
+operator subtask has its OWN local cache (3 per TM): 30.5/31.1/40.7 G on
+TM-1-4 at 19h, growing ~0.9 G/h per instance, monotonic, **0 LRU evictions
+yet**, hit ratio still 1.0000. `remainingBytes` ≈ 5.46 T (the disk-free
+bound sees vidar's disk). Expected during from-genesis backfill (working set
+= entire history), but: the `size-based-limit: 100g` is evidently
+**per instance**, so worst case 9 × 100 G ≈ 900 G on vidar alone (all three
+TMs schedule there). At current slope the biggest instance hits the 100 g
+cap in ~2–3 days → that will be the FIRST live test of size-based eviction;
+verify evict actually fires (lru_evict > 0), disk stops growing, and hit
+rate stays sane. Also note the cliff in working_set does NOT correlate with
+checkpoints/restarts — purely kernel LRU timing.
+
+**Still owed:** upstream JIRA for the ReadOptions leak with the profile
+evidence (item 5c) + FLINK-XXXXX id into flink-patches/README.md; optional
+jeprof confirmation diff; output-equivalence pass vs eth-stacks-v11 once
+backfill lands.
+
 ### 2026-08-04 (cont.) — ReadOptions leak patch IMPLEMENTED on `ethStacksAsyncState` (uncommitted, awaiting review)
 
 Executed the patch plan from the morning session. All four prep steps done;
