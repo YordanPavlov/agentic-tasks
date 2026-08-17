@@ -49,16 +49,18 @@ is safe because:
 
 - Wrap the per-batch `ReadOptions` in `ForStGeneralMultiGetOperation#process`
   in try-with-resources so it is closed after the batch completes.
-- (if we add the test) Add a regression test asserting all `ReadOptions`
-  created by `process()` are closed when the returned future completes.
 
 ### Verifying this change
 
-- Existing `ForStGeneralMultiGetOperationTest` covers the functional
-  behavior of `process()` for value/list/map states.
-- (if we add the test) New test `testReadOptionsClosedAfterProcess`
-  asserts closure via `isOwningHandle()`, following the pattern of
-  `ForStResourceContainerTest`.
+This change is already covered by existing tests: functional behavior of
+`process()` for value/list/map states is exercised by
+`ForStGeneralMultiGetOperationTest` (module suite green: 979 tests).
+No new test asserts the closure itself — the `ReadOptions` is local to the
+executor lambda, and we preferred not to add a test-only seam to the
+production code; happy to add one if preferred.
+
+Additionally:
+
 - Verified in production (Flink 2.3.0, ForSt async state backend, patched
   class): TaskManager RSS growth dropped from 2.2–3.9 GiB/h to ~20 MiB/h
   (flat over 19+ hours) with unchanged job output.
@@ -85,7 +87,8 @@ is safe because:
 - [x] Fix ported (one-line try-with-resources), spotless clean
 - [x] Module build green (deps built, -DskipTests -Dfast)
 - [x] Module test suite green 2026-08-17 (979 run, 0 failures, 5 skipped)
-- [ ] Decide: include regression test (agent recommends yes; seam =
+- [x] Decision 2026-08-17: go WITHOUT a regression test for now; PR body
+      offers to add one if the reviewer prefers (seam design ready:
       package-private createReadOptions() + test subclass, isOwningHandle
       assertion)
 - [ ] Yordan: commit on branch, push to fork, open PR vs apache/flink:master
