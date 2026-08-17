@@ -91,7 +91,15 @@ Additionally:
       offers to add one if the reviewer prefers (seam design ready:
       package-private createReadOptions() + test subclass, isOwningHandle
       assertion)
-- [ ] Yordan: commit on branch, push to fork, open PR vs apache/flink:master
+- [x] PR open: https://github.com/apache/flink/pull/28985 (head 9a5fd84)
+- [x] Fork GitHub Actions enabled; "Flink CI (beta)" run 32033914116 GREEN
+      2026-08-17 after rerunning E2E groups 1+3 (first-run failures were CI
+      infra: minikube startup + 404/429 download rate limits — same cause
+      failed Azure build 78149). Fork checks do NOT propagate to the
+      upstream PR (verified: empty statusCheckRollup) — paste run link.
+- [ ] Yordan: comment green fork-CI run link on the PR
+- [ ] Yordan: `@flinkbot run azure` again to clear Azure FAILURE badge
+- [ ] Yordan: reply to Zakelly Lan on FLINK-40327 with the PR link
 - [ ] Ask in PR/JIRA about backport to release-2.3
 - [ ] After merge: note fixed version in flink-patches/README.md; drop
       Dockerfile injection on the version bump that contains the fix
