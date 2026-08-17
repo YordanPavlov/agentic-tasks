@@ -84,7 +84,7 @@ is safe because:
 - [x] Fork + branch FLINK-40327 off upstream/master
 - [x] Fix ported (one-line try-with-resources), spotless clean
 - [x] Module build green (deps built, -DskipTests -Dfast)
-- [ ] Module test suite green (running 2026-08-17)
+- [x] Module test suite green 2026-08-17 (979 run, 0 failures, 5 skipped)
 - [ ] Decide: include regression test (agent recommends yes; seam =
       package-private createReadOptions() + test subclass, isOwningHandle
       assertion)
