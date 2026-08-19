@@ -118,3 +118,12 @@ hard `INFINITE_WINDOW_PERIOD_DAYS` rule. Shipped PR #2308 (circulation_job
 rule + `stack_circulation_[delta_]100y` specs + `total_supply` re-wire;
 +36/−3). Not merged — backfill gate documented in the PR body. Next: metadata
 registration + stage backfill/equality run, then consumer re-root PR.
+
+### 2026-08-19 — PR #2308 CI blocked (not a defect in this change)
+
+The `build and push` job fails because the two new metrics are not yet in
+`metric_metadata_versioned` and the August CI refactor now generates the
+dependency graphs *during* the image build. Metadata registration — already the
+next step here — has become a hard prerequisite for a green build, and the CI
+path that would do it runs dry-run on branches. Analysis and fix options:
+[ci-metric-registration-gap](../2026-08-ci-metric-registration-gap/ci-metric-registration-gap.md).
