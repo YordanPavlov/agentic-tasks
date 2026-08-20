@@ -89,16 +89,38 @@ becomes the binding constraint after it. At the chain head, strides are one
 block — semantics and latency unchanged.
 
 **Tier 2 — pre-group same-key records upstream of the keyBy (the
-order-of-magnitude lever):** a chained non-keyed operator buffers records on
-heap per (block, key) and, on each watermark advance, emits one composite
-record per (key, stride). The hot key then receives ≤ source-parallelism (8)
-composites per stride instead of 184 records per block — two to three orders
-of magnitude fewer serialized round-trips. Naturally adaptive: catch-up
-strides span many blocks, real-time strides are single blocks, so per-block
-latency at the head is preserved with no mode switch. Costs: new operator +
-composite record type through the keyed operator; heap buffer is bounded by
-the alignment envelope (~10 MB/instance at 40 blocks); migration needs
-`stop-with-savepoint --drain` or a fresh run.
+order-of-magnitude lever) — IMPLEMENTED 2026-08-20 (on `ethStacksAsyncState`,
+pending review, not yet committed):** a chained non-keyed operator
+(`PreGroupAccountChanges`) buffers records on heap per (account, block) and
+emits one composite (`AccountChangeBatch`, possibly spanning several blocks)
+per account per flush. The hot key then receives ≤ upstream-parallelism
+composites per flush instead of 184 records per block. Implementation notes
+vs the original sketch:
+- Watermarks turn out to advance per block (per-event `blockNumber − 1`
+  strategy), so multi-block strides don't come for free: flush cadence is a
+  new config `stackPreGroupFlushIntervalMs` (default 200 ms of processing
+  time). At the head, blocks arrive seconds apart → every block flushes
+  immediately (latency unchanged); during catch-up many blocks coalesce per
+  flush. Between flushes the operator *holds watermarks back* so a block's
+  records always precede the watermark that covers it — the one invariant
+  the downstream drain relies on.
+- The operator is stateless across checkpoints: `prepareSnapshotPreBarrier`
+  flushes everything ahead of the barrier.
+- Correctness does not depend on flush timing: the keyed drain regroups
+  scanned records by inner block timestamp across all buffered composites
+  (a (key, block) split over several composites reunites there), processes
+  only watermark-passed blocks, and trims/writes back composites that
+  straddle the watermark. Each block still runs as exactly one
+  byte-exact head cycle; per-inner-block timers keep drain timing identical
+  to the per-record design.
+- `blockBuffer` value type changed (record → composite) under the same
+  state name → old checkpoints fail fast; fresh run per fleet policy, same
+  as the `a1cbf092` deploy.
+- Tests: window-variant equivalence suite extended (per-block composites,
+  split composites + straddle/write-back via per-event watermarks, one
+  giant composite per account via held flushes) + a new operator harness
+  suite (grouping, hold-back, barrier flush, late singleton pass-through);
+  all 132 unit tests and the job-graph build smoke tests green.
 
 **Tier 3 — raise `sourceWatermarkAlignmentBlocks` (config-only, after
 Tier 2):** today the envelope does NOT help (the hot key is slow in steady
