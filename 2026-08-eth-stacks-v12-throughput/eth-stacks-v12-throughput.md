@@ -5,12 +5,15 @@
 - **Goal:** assess the first long ForSt/async-state production run of the ETH
   stacks job (eth-stacks-v12, branch `ethStacksAsyncState`, Hetzner prod) and
   identify throughput improvements for the historical backfill.
-- **Status:** fixes complete, nothing deployed yet. Fix 1 (append-only block
-  buffer, `a1cbf092`) and Tier 2 (upstream pre-grouping, `7fc40c01`, plus
-  `c1ab9f77` comment cleanup and `ade93a08` flush default 200 ms → 2 s) are
-  all on `ethStacksAsyncState` and pushed (2026-08-21). **Next session:
-  deploy as a fresh run (old checkpoints fail fast by design), evaluate
-  against the checklist below.**
+- **Status:** deployed as a fresh run 2026-08-20 ~14:15 UTC and **evaluated
+  after 16 h (2026-08-21) — success on every checklist axis**; see the
+  evaluation section at the bottom. Post-London rate ~180–240 blocks/s vs
+  4.5 pre-fix (~40–50×). Fix 1 (append-only block buffer, `a1cbf092`) and
+  Tier 2 (upstream pre-grouping, `7fc40c01`, plus `c1ab9f77` comment cleanup
+  and `ade93a08` flush default 200 ms → 2 s) are all on `ethStacksAsyncState`.
+  **Next session: output correctness spot-check — `eth_stacks` rows around
+  the London boundary vs pre-optimization (window-variant-era) data; must be
+  byte-identical.**
 - **Headline finding:** the job's throughput is capped by a **single hot key —
   the `burn` fee account** introduced by the London fork (EIP-1559, block
   12,965,000). When the backfill watermark crossed that block at 19:30 UTC
@@ -184,3 +187,44 @@ Watch via Prometheus (`app="eth-stacks-v12"`, job must run as a FRESH run):
   the per-block head cycles per drain — the natural next code change, the
   drain already collects k ready blocks in one place) is worth building.
   Catch-up arithmetic: ~10M blocks to head; 50 blocks/s ≈ 2.3 days.
+
+## Evaluation results — 16 h in (2026-08-21, fresh run started 2026-08-20 ~14:15 UTC)
+
+All checklist items pass. Prometheus (`app="eth-stacks-v12"`) + Loki (hprod);
+pods 16 h old, 0 restarts.
+
+- **Block rate:** watermark at **20,940,986** after 16 h. Post-London
+  (crossed 12.965M ~19:5x on 08-20) the hourly slope holds **~180–240
+  blocks/s** vs 4.5 pre-fix — **~40–50×**. Early pre-London hours ran
+  455–1,700 blocks/s (sparse blocks).
+- **Now record-throughput-bound, not hot-key-bound:** total pipeline input
+  is **flat at ~180–210k records/s for the entire run** while blocks/s
+  drifts down (245 → 178 overnight) — that's rising block density, not
+  degradation. The burn key no longer sets the rate.
+- **Batching factor:** pre-group out/in stable at **~0.30** (in ~185k rec/s
+  → out ~53k composites/s).
+- **busyTime Create_Stack_Changes:** ~614 ms/s avg (373–711 per subtask),
+  up from ~230. No task saturated at 1000 ms/s. `numBlockingKeys`
+  oscillates 0.3–5k with no throughput correlation.
+- **Checkpoints:** 398 completed, typical duration **5–8 s** (was 13–30 s).
+  1 failed = benign startup race at 14:18:47 ("Not all required tasks are
+  currently running", trigger vs deployment). One 30.5 s duration spike
+  ~03:53 UTC, one-off.
+- **Regressions:** TM RSS flat ~13 Gi all run (leak fix holds); ForSt file
+  cache 100% hit / 0 loadbacks, ~106 GB used.
+
+**Next limiter = CPU across the ensemble.** TMs run ~6.5–7 cores against a
+10-core limit with **20–30% of CFS periods throttled** (was zero pre-fix,
+when the job idled behind the hot key). No single operator is the choke
+point. Cheapest next lever: raise the TM CPU limit (devops values), not
+Tier 1 — head-cycle coalescing has low value now that burn isn't dominant.
+
+Watch items (benign so far): Kafka fetch noise — 373 `DisconnectException`
+reconnects/17 h (~22/h) plus a 7-occurrence burst of "Unknown server error
+while fetching offset" on `eth_transfers_v3` partitions ~06:43; all
+auto-retried, no impact. Job pulls ~200k rec/s from those brokers.
+
+**Remaining gate (next session): output correctness.** Spot-check
+`eth_stacks` rows around the London boundary against pre-optimization
+(window-variant-era) values — semantics must be byte-identical. Not yet
+done.
