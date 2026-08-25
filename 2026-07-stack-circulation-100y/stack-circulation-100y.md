@@ -119,6 +119,22 @@ rule + `stack_circulation_[delta_]100y` specs + `total_supply` re-wire;
 +36/−3). Not merged — backfill gate documented in the PR body. Next: metadata
 registration + stage backfill/equality run, then consumer re-root PR.
 
+### 2026-08-25 — prod equality validation: BTC clean, BCH broken
+
+The 100y family is now live on prod (all 8 metrics — circulation + realized
+cap, daily + intraday, ids 2622–2629) with genesis backfill for BTC and BCH.
+Ran the 20y-equality check on both chains, all 8 pairs each:
+**BTC passes** (equal within Float64 noise, ≤1 satoshi / sub-cent; the
+"bit-equal" expectation is literally false only due to summation order).
+**BCH fails everywhere** — circ gap −997.6k BCH (~5%), RC gap $11.7B (6.4%),
+frozen since 2026-05-09 (live computation agrees again). Three components:
+−139.2k accumulated over 2009-01-09..02-02; −550k in discrete 2021 steps
+(candidate: the known master bugfix); and `delta_100y` = literal 0 for
+2024-08-16..2026-05-09 (~−308k net) — smells like a backfill defect/data
+hole, not a bugfix. Full method + numbers:
+[100y-vs-20y-prod-validation](100y-vs-20y-prod-validation.md). Next: map the
+known bugfix onto the 2021 steps, check `bch_stacks` for the zero-window.
+
 ### 2026-08-19 — PR #2308 CI blocked (not a defect in this change)
 
 The `build and push` job fails because the two new metrics are not yet in
