@@ -1,9 +1,9 @@
-# 100y vs 20y prod equality validation — BTC ✅, BCH ❌
+# 100y vs 20y prod equality validation — BTC ✅, LTC ✅, BCH ❌, XRP ❌, DOGE ⚠️
 
-**Date:** 2026-08-25
+**Date:** 2026-08-25 (BTC/BCH), 2026-08-27 (LTC/XRP/DOGE)
 **Context:** the 100y family is deployed on prod with genesis backfill done for
-BTC and BCH. Expectation: today (before the 2029 cancel cliff) every 100y
-series should equal its 20y counterpart. Parent doc:
+BTC and BCH (then LTC/XRP/DOGE). Expectation: today (before the 2029 cancel
+cliff) every 100y series should equal its 20y counterpart. Parent doc:
 [stack-circulation-100y](stack-circulation-100y.md).
 
 ## Metrics under test (8 pairs)
@@ -104,12 +104,75 @@ plausibly *correct* old 20y overcounting, while component 3 likely makes the
 100y series **undercount by ~300k**. Interpretation confidence: high on the
 data structure, medium on which side is right per component.
 
+## LTC (asset_id 2462) — PASS
+
+All 8 pairs equal at BTC-like noise levels. Daily: max abs 4.4e-6 LTC /
+$1.4e-4 (rel ≤ 1e-9, cum rel ~1e-14). Intraday deltas: max 3.5e-8 LTC.
+Head padding differs harmlessly: 20y daily has 22 extra all-zero days
+(2011-09-16..10-07, pre-genesis; LTC genesis 2011-10-08), intraday 20y has
+3,456 extra pre-genesis points (2011-09-26..10-07).
+
+One caveat, and it's a **20y-side defect**: since **2026-05-31 10:15** the
+intraday cum pair carries a constant **+6.25 LTC (one block reward)** offset
+(100y higher), persisting to HEAD (~25.3k points, rel 8e-8). At the
+transition bucket both delta series agree (+25.0) but the 20y cum advanced
+only +18.75 while the 100y cum advanced +25 — i.e. the **20y intraday cum is
+internally inconsistent with its own delta stream**; the 100y series is
+self-consistent. Daily pairs never show it (gap frozen at −2.3e-6). Verdict:
+100y LTC is good; the 20y intraday cum silently dropped one block.
+
+## XRP (asset_id 2053) — FAIL (catastrophic, 100y unusable)
+
+All 8 pairs wildly different. At HEAD: `circ_20y` = **100.53B** XRP vs
+`circ_100y` = **0.532B** — the 100y series is missing ~99.99B, i.e. the
+entire genesis allocation (gap −99.994B, rel ~1.0). RC: $94.76B (20y) vs
+$25.89B (100y). Structure:
+
+- 100y early values are **tiny negatives** (−0.0002 → −0.0036 over
+  2013-01-02..10) — impossible for a circulation metric; the fresh recompute
+  spends from genesis-era accounts it never credited.
+- The 20y side absorbs the genesis-era allocations as big steps the 100y side
+  lacks: **+85.81B on 2013-01-26**, +6.0B 02-06, +1.5B 02-07, +2.0B 08-01,
+  +1.99B 12-19; gap essentially saturated at −99.5B by 2018, −99.99B now.
+- 100y has 28 zero rows 2011-11-05..12-02 (pre-ledger padding, harmless) and
+  ~360 missing days mid-series (not yet profiled).
+- Level sanity: `circ_20y` = 100.53B slightly *exceeds* the 100B max supply,
+  so the 20y side overcounts ~0.5B too — but the 100y side is the unusable
+  one. Almost certainly the known open **XRP genesis handling** question
+  (ledger-32570 lost-history start): the backfill never ingested the genesis
+  distribution.
+
+## DOGE (asset_id 2695) — circulation PASS, realized cap FAIL
+
+Circulation (daily + intraday, cum + delta): matches to noise — max abs 23.7
+DOGE on a ~150B supply (rel 1.5e-10); worst delta diff 7.47 DOGE (rel 5.5e-7,
+small denominators). Fine.
+
+Realized cap: real divergence, up to **$25.1B / 116% relative**, starting
+2013-12-15. Since circulation matches, this is a *valuation-of-history*
+difference (price applied at move time), not coin movement. Gap profile
+(100y − 20y): drifts −8.5M (2013) → −353M (2018), then explodes during the
+2021 DOGE mania: −$2.6B (04-16), −$1.08B (04-17), −$1.46B (05-04), −$1.59B
+(05-07), **−$9.03B (10-29)**; partial reversals +$2.97B/+$3.44B (2022-07-19/21);
+more steps −$1.17B (2024-11-12), −$1.11B (2024-12-16). **Frozen at −$21.45B
+since 2025-07-02**; live rc deltas match since. Unknown which side is right —
+needs the same price-source archaeology as BCH.
+
 ## Open / next
 
-- Map the operator's known master bugfix onto components 1/2 (which days
-  does it predict?).
-- Investigate the 2024-08→2026-05 zero-delta window: do `bch_stacks` source
-  rows exist for those dates? Separates backfill bug vs data hole. Until
-  resolved, **BCH `total_supply` rooted on `circ_100y` would undercount**.
-- Repeat the sweep for the remaining stacks chains (LTC, DOGE, XRP, ETH) as
-  their backfills land.
+- Map the operator's known master bugfix onto BCH components 1/2 (which days
+  does it predict?). Does it also predict the DOGE 2021 rc steps?
+- Investigate the BCH 2024-08→2026-05 zero-delta window: do `bch_stacks`
+  source rows exist for those dates? Separates backfill bug vs data hole.
+  Until resolved, **BCH `total_supply` rooted on `circ_100y` would
+  undercount**.
+- **XRP: 100y family unusable** — genesis allocation never ingested (negative
+  early values, −99.99B at HEAD). Needs the open genesis product call
+  resolved + re-backfill before any use. Also profile the ~360 missing
+  mid-series days.
+- **DOGE: decide which rc history is right** (2021-centric $21.4B gap,
+  frozen since 2025-07-02). Circulation is fine.
+- **LTC 20y intraday cum dropped one block at 2026-05-31 10:15** (internally
+  inconsistent with its own deltas) — cosmetic (8e-8) but a live-pipeline
+  defect worth a look; 100y is clean.
+- Repeat the sweep for remaining stacks chains (ETH) as backfills land.

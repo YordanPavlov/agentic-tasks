@@ -100,5 +100,24 @@ seq columns in the shared tables stay.
 
 - Analyzed sequenced machinery (`jobs/__init__.py:97`, `sequence_number.py`),
   confirmed BCH-only usage, queried prod data state (above).
-- Operator approved plan; implementing spec-flip on branch
-  `bch-sequenced-revert`. No commit/push yet (review pending).
+- Operator approved plan; implemented spec-flip on branch
+  `bch-sequenced-revert` (uncommitted, review pending):
+  - 5 immutable cronjobs moved into `intraday-metrics-bch.yaml` (same names +
+    selectors, plain scripts, BTC-style args); immutable yaml deleted.
+  - `bch-payment-count` / `bch-transaction-volume` flipped to plain scripts.
+  - `airflow/dags/intraday_metrics_bch.py` reduced to the standard per-chain
+    pattern (== ltc file); `agent_docs/architecture.md` example updated.
+- Validation: 238/238 daily_metrics tests pass; ruff clean on the DAG file;
+  `export_dependency_graph.py --dag intraday-metrics-bch` against prod
+  metadata (readonly user) → 25 nodes / 22 edges, all 5 moved jobs present,
+  immutable graph skipped (no factories). Bonus: dependency edges
+  age-distribution → {realized-cap, circulation, network-profit-loss,
+  stack-age/price-consumed} and active-addresses-deltas → cumulative-sums
+  now wire *within* one DAG — under the immutable split these crossed DAG
+  boundaries unenforced.
+- Gotchas hit: `.env.dev` sets `DAILY_JOBS`/`DAILY_ASSETS`, silently
+  filtering the exporter to "no factories" — unset when exporting. Stage
+  metadata also lacks these specs (skips even for ltc), so export must run
+  against prod (readonly, DQL-only).
+- Pre-existing, out of scope: duplicate cronjob name `icrc-payment-count`
+  (twice in payment_count_cronjobs.yaml, also on master).
