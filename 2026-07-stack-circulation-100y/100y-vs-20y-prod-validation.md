@@ -275,6 +275,39 @@ future re-backfill of the 20y rc family too. Needs acquisition_price
 backfilled into the distribution history (upstream fix), then rc_100y
 re-backfill.
 
+### Provenance of the NULL prices (2026-08-27, git + computed_at forensics)
+
+- acquisition_price was **added to the age-distribution writers on
+  2025-03-19 (`84ec2023` "Add acquisition price to distribution deltas")**,
+  deployed ~2025-04-08 (= the cutover date everywhere). Rows written before
+  that are NULL by construction.
+- Follow-up bugfix **2026-02-27 (`d678ad9a` "Use LEFT ASOF join instead of
+  INNER — Using INNER JOIN we are loosing stack records")**: between
+  2025-03 and 2026-02 the price join silently DROPPED stack rows with no
+  matching price. Any distribution history (re)written in that window may be
+  missing records entirely — **prime candidate for the operator's "known
+  master bugfix" behind the BCH 2021 steps; check BCH's distribution
+  computed_at vintage** (cross-lead for the bch-sequenced-revert task).
+- Vintages (computed_at of pre-cutover rows, metric 162):
+  **BTC re-populated 2026-05-20** with post-fix code, 0 NULLs of 787M rows —
+  which is why BTC passed both gates. **XRP: 2020-08 → 2025-04, 99.4% NULL
+  (2.07B rows). DOGE: 2024-02 → 2025-04-09, 100% NULL (301M rows).**
+  Neither was re-run after the feature landed. Notably XRP's distribution
+  history was NOT re-derived even by the 2026-07 odt migration (stacks only).
+- Remedy: re-run the age-distribution historical backfill for XRP + DOGE
+  (same operation as BTC's 2026-05-20 run, mind the raced-DELETE sequencing
+  issue), then re-run the 100y genesis backfills (circ for XRP needs
+  PR #2344 deployed first).
+
+## Fix PR
+
+**PR #2344 `odt-zero-out-of-window`** (2026-08-27): `WHERE dt - odt < period
+AND odt!=0` at all 8 filter sites in circulation_job, realized_cap_job +
+intraday variants. Verified: 20y outputs bit-identical old vs new filter;
+100y filter now reproduces 20y on XRP genesis era exactly. After deploy:
+XRP circ_100y genesis re-backfill (ETH's future backfill correct from
+start).
+
 ## Open / next
 
 - Map the operator's known master bugfix onto BCH components 1/2 (which days
