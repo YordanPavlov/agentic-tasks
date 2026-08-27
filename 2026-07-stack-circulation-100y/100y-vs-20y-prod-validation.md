@@ -138,9 +138,40 @@ $25.89B (100y). Structure:
   ~360 missing days mid-series (not yet profiled).
 - Level sanity: `circ_20y` = 100.53B slightly *exceeds* the 100B max supply,
   so the 20y side overcounts ~0.5B too — but the 100y side is the unusable
-  one. Almost certainly the known open **XRP genesis handling** question
-  (ledger-32570 lost-history start): the backfill never ingested the genesis
-  distribution.
+  one.
+
+### Root cause (2026-08-27, CONFIRMED): epoch-0 odt sentinel vs 100y window
+
+Circulation reads `distribution_deltas_5min` (metric 162,
+`value`=odt, `measure`=amount) via `circulation_job.py` with filter
+**`WHERE dt - odt < period`**. Genesis/unknown-origin coins carry
+**`odt = 0` (1970-01-01)** — a sentinel meaning "older than history"
+(XRP ledgers before 32570 are lost; balances pre-exist). When such coins
+move, the pipeline emits `+amount @ odt=dt` and `−amount @ odt=epoch0`.
+
+- **20y**: `dt − 1970 ≈ 43y+ ≥ 20y` → epoch-0 negative row excluded →
+  the move counts as old coins entering circulation. Correct by accident.
+- **100y**: `43y < 100y` → epoch-0 negative row **included** → cancels the
+  positive row → **the move nets to 0 forever** (until 2070). The tiny
+  negative values are float residue of the cancelling pairs.
+
+Proof: on 2013-01-26 the distribution layer holds +85,810,081,001 at fresh
+odt vs −85,810,000,500 at epoch-0; recomputing monthly deltas from the
+current source with the 20y filter reproduces the stored 20y series exactly,
+with the 100y filter gives ~0. **Yearly epoch-0 outflow matches the circ gap
+year-by-year to float noise** (2013 −98.656B … 2026 cum −99.9946B ≡ gap).
+Not missing source data; not a backfill defect; ongoing live (~kXRP/day).
+Fix is semantic: treat `odt = 0` as infinitely old (out-of-window for ANY
+period) in circulation/realized-cap jobs (+ intraday variants), or re-assign
+genesis odt upstream — ties into the open XRP genesis product call.
+
+### Root cause for XRP realized cap: NULL acquisition_price (shared w/ DOGE)
+
+The epoch-0 rows contribute **$0** to rc (their `acquisition_price` is
+NULL). The rc gap is instead the NULL-price hole below: XRP
+`acquisition_price` is **all-NULL every day 2012 → ~2025-04**; rc_100y
+pre-2025 history is zero, the $25.9B at HEAD accumulated purely since the
+2025-04 cutover.
 
 ## DOGE (asset_id 2695) — circulation PASS, realized cap FAIL
 
@@ -155,8 +186,27 @@ difference (price applied at move time), not coin movement. Gap profile
 2021 DOGE mania: −$2.6B (04-16), −$1.08B (04-17), −$1.46B (05-04), −$1.59B
 (05-07), **−$9.03B (10-29)**; partial reversals +$2.97B/+$3.44B (2022-07-19/21);
 more steps −$1.17B (2024-11-12), −$1.11B (2024-12-16). **Frozen at −$21.45B
-since 2025-07-02**; live rc deltas match since. Unknown which side is right —
-needs the same price-source archaeology as BCH.
+since 2025-07-02**; live rc deltas match since.
+
+### Root cause (2026-08-27, CONFIRMED): NULL acquisition_price pre-cutover
+
+`distribution_deltas_5min.acquisition_price` is **NULL on every row of every
+day** of DOGE history until the stacks-pipeline cutover: first non-NULL
+price = **2025-04-08** (the same cutover date seen in the BCH analysis).
+`realized_cap_job.py` computes `sum(amount * acquisition_price)` →
+`amount × NULL` = NULL → sum skips it → the 100y genesis backfill wrote
+**rc_delta_100y = 0 on all 4,132 days before 2025-04** (verified: zero
+nonzero days). The frozen 20y history was computed years ago from the old,
+price-bearing table state and is the correct side. The "steps" in the gap
+are just mirror images of rc_20y's own daily deltas. Amounts (`measure`)
+are intact → circulation unaffected. DOGE has 3.45M epoch-0 rows but they
+net to −24 DOGE / $0 — no XRP-style problem.
+
+Consequence: **any recompute of pre-2025-04 realized cap from the current
+distribution table produces zeros** — this endangers not just 100y but any
+future re-backfill of the 20y rc family too. Needs acquisition_price
+backfilled into the distribution history (upstream fix), then rc_100y
+re-backfill.
 
 ## Open / next
 
@@ -166,12 +216,17 @@ needs the same price-source archaeology as BCH.
   source rows exist for those dates? Separates backfill bug vs data hole.
   Until resolved, **BCH `total_supply` rooted on `circ_100y` would
   undercount**.
-- **XRP: 100y family unusable** — genesis allocation never ingested (negative
-  early values, −99.99B at HEAD). Needs the open genesis product call
-  resolved + re-backfill before any use. Also profile the ~360 missing
+- **XRP circ: decide epoch-0 semantics** — treat `odt = 0` as infinitely old
+  in the window filter (circulation_job, realized_cap_job + intraday
+  variants), or re-assign genesis odt upstream; then re-backfill circ_100y.
+  Part of the open genesis product call. Also profile the ~360 missing
   mid-series days.
-- **DOGE: decide which rc history is right** (2021-centric $21.4B gap,
-  frozen since 2025-07-02). Circulation is fine.
+- **XRP + DOGE rc: backfill acquisition_price** in `distribution_deltas_5min`
+  pre-2025-04-08 history (all-NULL for both chains), then re-backfill
+  rc_100y. Check remaining chains for the same hole (BTC/LTC rc passed, so
+  their tables still carry prices; check BCH and future chains). Until then
+  rc_100y for XRP/DOGE is unusable pre-2025-04 and any 20y rc recompute
+  would be silently zeroed too.
 - **LTC 20y intraday cum dropped one block at 2026-05-31 10:15** (internally
   inconsistent with its own deltas) — cosmetic (8e-8) but a live-pipeline
   defect worth a look; 100y is clean.
