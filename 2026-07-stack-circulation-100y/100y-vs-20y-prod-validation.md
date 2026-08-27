@@ -165,6 +165,43 @@ Fix is semantic: treat `odt = 0` as infinitely old (out-of-window for ANY
 period) in circulation/realized-cap jobs (+ intraday variants), or re-assign
 genesis odt upstream — ties into the open XRP genesis product call.
 
+### Convention analysis (2026-08-27): odt=dt seed vs odt=0 sentinel
+
+Our odt convention for coin *creation* is `odt = dt` — verified on BTC:
+every coinbase mint appears in `distribution_deltas_5min` as
+`+50 @ odt = dt` at mint time. The XRP construction violates it twice:
+**no seed/creation rows were ever emitted** (all 294,612 epoch-0 rows are
+negative-only, −99.994B total; the 100B initial balances exist only as
+implicit stacks), and the implicit stacks carry `odt = 0` instead of the
+first-tracked-ledger time. Note: just relabeling the −rows to `odt = dt`
+would be wrong — they'd cancel their paired +rows in every window and break
+20y too.
+
+Two convention-correct fixes:
+- **(a) Mint-at-genesis (BTC-like):** seed `+100B @ dt = odt = ledger-32570
+  time` upstream, outflow −rows then carry that odt. circ_100y = 100B −
+  burns from day one ≈ true total supply. But recomputed 20y history changes
+  shape (100B at 2013-01-01 instead of the "distribution ramp"), breaking
+  the frozen-history equality gate by design. Upstream data surgery.
+- **(b) Epoch-0 = infinitely old:** job-side filter change
+  (`odt=0 rows never in-window`), preserves "counts on first move"
+  semantics, makes 100y ≡ 20y bit-for-bit today, only needs 100y
+  re-backfill. Undercounts true supply only by never-moved coins — by now
+  just ~5.4M XRP (100B − 99.9946B epoch-0 outflow − burns). Pragmatic pick.
+
+### NEW defect (both series, live): unbalanced deltas since 2025-04 cutover
+
+Net of ALL distribution deltas per year should be ≈ −burns (and is:
+cumulative −14.26M ≈ XRP fee burns through 2024). From the 2025-04 cutover
+the stream goes unbalanced-positive in bursts: +12.8M (2025-04), +22.5M
+(05), +22.5M (06), +60.0M (07), ~0 (08-09), then +378.6M during 2026 —
+cumulative **+532M**. This is exactly `circ_100y` at HEAD (0.532B) and
+exactly the 20y overshoot above max supply (100.5267B = 99.9946B epoch-0
+outflow + 0.532B drift). Coins are being created from nothing —
+**both 20y and 100y are inflated by +532M and growing**; circ_20y > 100B
+max supply is the smoking gun. Likely +rows emitted without matching −rows
+(untracked source stacks post-cutover). Needs its own investigation.
+
 ### Root cause for XRP realized cap: NULL acquisition_price (shared w/ DOGE)
 
 The epoch-0 rows contribute **$0** to rc (their `acquisition_price` is
