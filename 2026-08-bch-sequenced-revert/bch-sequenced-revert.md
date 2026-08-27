@@ -133,3 +133,32 @@ seq columns in the shared tables stay.
   different hunks of payment_count_cronjobs.yaml).
 - Next (after merge + deploy): stage check, then full BCH history backfill
   (plan steps 2–4).
+
+### 2026-08-27 — stage validation (step 2) PASSED
+
+Operator deployed to a test Airflow cluster writing to stage CH and enabled
+`intraday-metrics-bch-historical` (catchup from 2009). Inspected stage
+(asset_id 381; metric ids differ from prod — resolve by name per cluster).
+
+- DAG shape confirmed: immutable DAG gone; intraday historical has 24 tasks
+  incl. the 5 moved ones (`bch-address-changes-delta-intraday-hourly` absent
+  by design: `exportable: false`); daily-metrics-historical-bch has the 2
+  flipped daily jobs.
+- All 5 moved jobs write: deltas, cumulative sums, tx volume,
+  age-distribution (distribution_deltas_5min), delta-cancels
+  (intraday_delta_futures, 4.3M rows); backfill reached ~2010-12;
+  seq_num=0 / is_finalized=true defaults everywhere.
+- Values vs prod (monthly aggregates 2009-02..07):
+  - transaction_volume_5min, stack_age_consumed_5min: **bit-identical**.
+  - active_addresses_delta_24h: identical Mar–Jul; Feb-only cold-start diff.
+  - active_addresses_24h: exactly **prod + 2599** — cumulative continuation
+    correctly seeded from a stale stage row (2009-01-31 23:55, value 2599,
+    computed_at 2026-06-14, old stage experiment). Not a code defect; on
+    prod the seed is genuine pre-pilot data.
+- Stage sources (bch transfers/stacks) proved fine for early history despite
+  operator concern; only destination tables carried stale junk.
+- **Gap found**: `@monthly` + start_date 2009-01-09 ⇒ first data interval is
+  2009-02-01; 2009-01-09..31 never covered by catchup. For prod: either one
+  manual run for Jan 2009 or accept (prod Jan data is valid and seeds the
+  cumulative continuation). Recommended: accept.
+- Next: prod deploy (step 3), then full backfill (step 4).
