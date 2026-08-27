@@ -2,7 +2,7 @@
 
 **Started:** 2026-08-27
 **Repo:** `clickhouse-tables` (branch `bch-sequenced-revert`)
-**PR:** — (not yet)
+**PR:** [#2341](https://github.com/santiment/clickhouse-tables/pull/2341) — spec flip; [#2342](https://github.com/santiment/clickhouse-tables/pull/2342) — icrc-payment-count dup removal (side find)
 
 ## What this task IS
 
@@ -121,3 +121,15 @@ seq columns in the shared tables stay.
   against prod (readonly, DQL-only).
 - Pre-existing, out of scope: duplicate cronjob name `icrc-payment-count`
   (twice in payment_count_cronjobs.yaml, also on master).
+
+### 2026-08-27 — PRs opened
+
+- Operator reviewed the diff; approved commit+push.
+- [#2341](https://github.com/santiment/clickhouse-tables/pull/2341) — the
+  spec-flip (branch `bch-sequenced-revert`).
+- [#2342](https://github.com/santiment/clickhouse-tables/pull/2342) — removes
+  the pre-existing byte-identical duplicate `icrc-payment-count` doc (branch
+  `fix-icrc-payment-count-duplicate`, off master; no conflict with #2341 —
+  different hunks of payment_count_cronjobs.yaml).
+- Next (after merge + deploy): stage check, then full BCH history backfill
+  (plan steps 2–4).
