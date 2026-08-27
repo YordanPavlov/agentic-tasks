@@ -1,10 +1,47 @@
 # 100y vs 20y prod equality validation — BTC ✅, LTC ✅, BCH ❌, XRP ❌, DOGE ⚠️
 
-**Date:** 2026-08-25 (BTC/BCH), 2026-08-27 (LTC/XRP/DOGE)
+**Date:** 2026-08-25 (BTC/BCH), 2026-08-27 (LTC/XRP/DOGE + root causes)
 **Context:** the 100y family is deployed on prod with genesis backfill done for
 BTC and BCH (then LTC/XRP/DOGE). Expectation: today (before the 2029 cancel
 cliff) every 100y series should equal its 20y counterpart. Parent doc:
 [stack-circulation-100y](stack-circulation-100y.md).
+
+## Status summary (as of 2026-08-27)
+
+| Chain | Circulation | Realized cap | Root cause / blocker |
+|---|---|---|---|
+| BTC | ✅ pass (noise) | ✅ pass (noise) | distribution history re-populated 2026-05-20 post-fixes — clean |
+| LTC | ✅ pass (noise) | ✅ pass (noise) | one *20y-side* defect: 20y intraday cum dropped a 6.25 block 2026-05-31 (cosmetic, unfixed) |
+| BCH | ❌ fail | ❌ fail | separate task (bch-sequenced-revert); raced DELETE + check d678ad9a INNER-ASOF vintage |
+| XRP | ❌ fail (−99.99B) | ❌ fail | circ: epoch-0 sentinel — **fixed by PR #2344**, needs deploy + genesis re-backfill; rc: NULL prices (below) |
+| DOGE | ✅ pass (noise) | ❌ fail (−$21.4B) | rc: NULL acquisition_price pre-2025-04-08 — needs age-distribution history re-run, then rc_100y re-backfill |
+| ETH | ⏳ not testable | ⏳ not testable | genesis backfill mid-flight (reached 2018-02-07; live rows since 2026-08-20); **needs #2344** — see below |
+
+Fixes shipped: **PR #2344** (odt=0 treated as infinitely old — XRP circ, ETH
+pre-emptively). Fixes pending elsewhere: acquisition_price history re-run
+(XRP+DOGE rc), BCH (own task), XRP live +532M drift (unowned, in Flink/sink
+layer), LTC 20y intraday one-block drop (unowned, cosmetic).
+
+### ETH detail (2026-08-27)
+
+- **Backfill state:** 100y genesis backfill is mid-flight — coverage
+  2015-07-30 (genesis) → 2018-02-07, plus a harmless pre-genesis zero-pad
+  block 2013-12-08 → 2014-06-21; live 100y rows only since 2026-08-20.
+  Equality gate cannot run until the backfill completes.
+- **Does ETH need the odt=0 exclusion? Yes.** ETH has 68,696 epoch-0
+  liability rows (−0.32M ETH cumulative, 2016-07-20 DAO-era → 2021-03-22).
+  Without #2344 the 100y window includes them → circ_100y would undershoot
+  circ_20y by up to ~0.32M ETH (~0.27% of supply) — small next to XRP's
+  99.99% but a hard gate failure, far above float noise. With #2344 both
+  windows drop the sentinel rows identically → equality restored.
+- **Timing problem:** the in-flight backfill runs pre-#2344 code and has
+  already passed 2016-07-20 (it's at 2018-02) — it is baking the epoch-0
+  gap into history right now. After #2344 deploys, re-backfill from
+  ≥ 2016-07-20 (or restart entirely).
+- **rc is NOT exposed to the DOGE NULL-price problem:** ETH's pre-cutover
+  distribution history (2.95B rows, written 2020-07 → 2025-12) has only
+  0.011% NULL acquisition_price (319,568 rows — the pre-price-era remnant
+  incl. the epoch-0 rows themselves, which #2344 excludes anyway).
 
 ## Metrics under test (8 pairs)
 
@@ -330,4 +367,9 @@ start).
 - **LTC 20y intraday cum dropped one block at 2026-05-31 10:15** (internally
   inconsistent with its own deltas) — cosmetic (8e-8) but a live-pipeline
   defect worth a look; 100y is clean.
-- Repeat the sweep for remaining stacks chains (ETH) as backfills land.
+- **ETH**: wait for #2344 deploy, re-run the genesis backfill from
+  ≥ 2016-07-20 (in-flight run is baking in the epoch-0 gap), then run the
+  equality sweep. rc history is fine (0.011% NULL prices).
+- **XRP live +532M unbalanced-delta drift** (since 2025-04 cutover, bursty,
+  pushes circ_20y above max supply): needs its own investigation in the
+  Flink→Kafka→CH path.
