@@ -162,3 +162,20 @@ Operator deployed to a test Airflow cluster writing to stage CH and enabled
   manual run for Jan 2009 or accept (prod Jan data is valid and seeds the
   cumulative continuation). Recommended: accept.
 - Next: prod deploy (step 3), then full backfill (step 4).
+
+### 2026-08-27 — daily historical validation PASSED
+
+Operator triggered `daily-metrics-historical-bch` on the test cluster.
+Frontier at validation time: pc through ~2011-11, tv through ~2013-07;
+starts correctly at 2009-01-09 (no first-month gap on the daily DAG).
+
+- payment_count: **bit-identical to prod on every backfilled day** (0/3120
+  mismatches; 2009+2010 full-year sums identical).
+- transaction_volume: 67/3120 days differ only in the 6th decimal,
+  max relative diff 6.7e-12 — float summation-order noise. Effectively
+  identical.
+- Stray fresh rows at dt 2026-05-21 with seq_num 460/11933,
+  is_finalized=false: written by the **regular stage Airflow** still running
+  the old `:stage` image (PR #2341 unmerged) — its realtime daily-metrics DAG
+  keeps recomputing the tip of stage's stale source (ends 2026-05-21). Not
+  from the test cluster; resolves on merge+deploy.
