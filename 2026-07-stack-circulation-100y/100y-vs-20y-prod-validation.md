@@ -165,6 +165,36 @@ Fix is semantic: treat `odt = 0` as infinitely old (out-of-window for ANY
 period) in circulation/realized-cap jobs (+ intraday variants), or re-assign
 genesis odt upstream — ties into the open XRP genesis product call.
 
+### Flink origin of odt=0 (2026-08-27): shared overdraft/liability fallback
+
+Traced in etherbi-flink: XRP stacks use the SAME shared account-model
+machinery as ETH (`XRPStacks` → `ComputeAccountStackChangesTimeWindow` →
+`HandlerOneAccountChange`); there is no chain-specific construction logic
+and **no genesis seeding step anywhere in the codebase**. `odt=0` comes from
+the handler's deliberate overdraft fallback
+(`HandlerOneAccountChange.scala:188-208`): when a debit pops the stack empty
+with remainder (account spends coins the pipeline never tracked), it pushes
+a **negative "liability" segment with `ots = 0`** and emits
+`sign=1, ots=0, amount=−rem`. That matches the ClickHouse fingerprint
+exactly (epoch-0 rows are negative-only). The segment is a debt marker, not
+an acquisition — `ots=dt` would be wrong for it; `ots=0` is Flink's sentinel
+for "origin unknown / older than tracking".
+
+- XRP: tracked history starts at ledger 32570 with 100B already distributed
+  and unseeded → the fallback absorbs the entire genesis supply on first
+  spends (−99.99B).
+- BTC/LTC/DOGE/BCH: UTXO pipeline, full replay from block 0, mints are real
+  events (`+amount @ ots=ts`, verified for BTC coinbase) → fallback never
+  fires.
+- **ETH: same fallback fired 68,696 times, −0.32M ETH total, 2016-07-20
+  (DAO-fork era) → 2021-03-22.** Genesis premine was seeded properly (else
+  72M would show). Predict: ETH circ_100y will undershoot circ_20y by
+  ~0.32M ETH when its backfill lands, unless the DMF fix ships first.
+
+So the DMF-side reading is settled: the 20y window *accidentally* interprets
+the sentinel correctly (1970 = out-of-window); the infinite-window rule must
+do it *explicitly* — option (b) below matches Flink's intended semantics.
+
 ### Convention analysis (2026-08-27): odt=dt seed vs odt=0 sentinel
 
 Our odt convention for coin *creation* is `odt = dt` — verified on BTC:
