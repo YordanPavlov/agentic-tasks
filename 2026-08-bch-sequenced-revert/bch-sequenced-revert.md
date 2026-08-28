@@ -197,3 +197,21 @@ starts correctly at 2009-01-09 (no first-month gap on the daily DAG).
 - Next: publish GitHub Draft Release for prod cutover, then full backfill
   (same day preferred; cumulative BCH metrics ride the switchover seam until
   backfilled).
+
+### 2026-08-28 — stage DAG set landed after CI flake; step 2/stage COMPLETE
+
+- Root cause of the stale DAG set: the "test and build airflow" workflow's
+  build job died at the "parse every DAG" step with exit 130 /
+  "custom container implementation failed" — self-hosted runner infra flake
+  (test job green, no parse error). The clickhouse-tables image workflow had
+  succeeded, hence job pods flipped while DAGs stayed old.
+- `gh run rerun --failed` → green; DAG set propagated via the dags-s3-sync
+  sidecar (no pod restart needed — sidecar sync + scheduler re-parse
+  suffices; the rollout restart comes from the other workflow).
+- Operator visually confirmed: immutable DAG gone; intraday-metrics-bch and
+  -historical both show the expected 24 tasks incl. the 5 moved jobs.
+- Interim safety note proved out: while DAGs were stale, immutable-DAG task
+  names resolved to plain scripts in the new job image — duplicate interval
+  computes only, argMax-deduped.
+- Remaining: prod release publish → realtime health → full backfill →
+  verification → cleanup PR.
