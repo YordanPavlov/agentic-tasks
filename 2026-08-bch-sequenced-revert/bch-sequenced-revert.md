@@ -179,3 +179,21 @@ starts correctly at 2009-01-09 (no first-month gap on the daily DAG).
   the old `:stage` image (PR #2341 unmerged) — its realtime daily-metrics DAG
   keeps recomputing the tip of stage's stale source (ends 2026-05-21). Not
   from the test cluster; resolves on merge+deploy.
+
+### 2026-08-28 — #2341 merged; stage cutover confirmed
+
+- Merged 09:09 UTC. Stage auto-sync: clickhouse-tables:stage image flipped
+  job scripts (same cronjob names ⇒ effective immediately, even before the
+  Airflow restart); airflow rollout landed ~09:25 (09:12 restart was node
+  churn; scheduler RS hash unchanged — deploy restarts are pod replacements
+  on mutable :master tag).
+- Confirmed: last sequenced write on stage 08:19 UTC (pre-merge), none
+  after; job pods running under dag_id=intraday-metrics-bch (balance-changes,
+  circulation, realized-cap seen live), zero under
+  intraday-metrics-bch-immutable over a 18-min watch.
+- Env notes: kubectl exec blocked via proxy ("Upgrade request required") on
+  stage; stage airflow web 502/unauth — DAG-bag verified via pod dag_id
+  labels + CH write silence instead.
+- Next: publish GitHub Draft Release for prod cutover, then full backfill
+  (same day preferred; cumulative BCH metrics ride the switchover seam until
+  backfilled).
