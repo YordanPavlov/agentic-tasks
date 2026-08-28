@@ -1,0 +1,3 @@
+Poco/Xiaomi phones have a hidden diagnostic tool. Open the Phone (dialer) app and type:
+
+*#*#6484#*#*
