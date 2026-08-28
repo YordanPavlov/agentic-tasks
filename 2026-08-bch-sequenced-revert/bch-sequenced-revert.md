@@ -215,3 +215,47 @@ starts correctly at 2009-01-09 (no first-month gap on the daily DAG).
   computes only, argMax-deduped.
 - Remaining: prod release publish → realtime health → full backfill →
   verification → cleanup PR.
+
+### 2026-08-28 — prod cutover done; backfill approach settled; session wrap
+
+- **Prod cutover (step 3) DONE**: release v3.0.5 published 10:59 UTC (the
+  cancelled duplicate release build is expected — fcde1de3). Confirmed:
+  moved-task pod (bch-stack-age-consumed-intraday) running under
+  dag_id=intraday-metrics-bch on prod, 0 immutable pods, last sequenced
+  prod write 2026-08-28 11:00:14 (pre-deploy).
+- **Backfill method settled**: operator's playbook — pause → *clear* (not
+  delete) all dag runs → unpause — is safe: the cached-next_dagrun gotcha
+  only bites when runs are *deleted* and catchup recreates them. Clearing
+  existing runs re-executes all current tasks (incl. the 5 new ones),
+  respects depends_on_past, scheduler-driven. UI caveat: run list paginates,
+  "select all" is per-page (~212 runs). Order: intraday-metrics-bch-historical
+  to FULL completion, then daily-metrics-historical-bch (daily reads
+  intraday intermediates; no sensor — crossover hazard documented in the
+  airflow-runs-analysis skill). Post-unpause fingerprint check: earliest
+  re-executing run ≈ 2009-02-01 + fresh 2009 computed_at in prod CH.
+- bch-failure.log analyzed: dag_id=custom-historical-metrics /
+  historical-run @ 2015-07-30 — pod EVICTED (exit 137,
+  EvictionByEvictionAPI, node drain/autoscaler); infra flake, task went
+  UP_FOR_RETRY, self-heals. NB: that pod ran **eth** 100y-circulation jobs
+  (metrics 2623/2627, asset 1681) — NOT BCH. Open question: operator's BCH
+  re-run vehicle — custom-historical-metrics selectors point at ETH; if BCH
+  intended, repoint selectors or use the per-asset DAG playbook.
+- Experimental DAGs: `daily-metrics-historical-bch-experimental` is NOT
+  repo-defined (no git trace) → stale Airflow-DB row or stray S3 dags-bucket
+  file; deletion is an ops action, not a PR. Six repo-defined experimental
+  files exist (erc20/arb-erc20/opt-erc20 × daily/intraday,
+  erc20AgeBalancesNoMetricCopy experiment) — removal PR pending operator
+  decision on scope.
+- Env facts learned: kubectl exec blocked via proxy on both stage and prod
+  ("Upgrade request required") → airflow-runs-analysis skill's exec-based
+  procedures unusable from this container; DAG set propagates via
+  dags-s3-sync sidecar without pod restarts; "test and build airflow" GH
+  workflow can flake with exit 130 "custom container implementation failed"
+  (self-hosted runner) — plain rerun fixes.
+
+**Open threads**: (1) confirm BCH intraday backfill actually kicked off via
+the right DAG + fingerprint check; (2) daily backfill after intraday
+completes; (3) verification suite (seam, sequenced-era diff,
+stack_circulation zero-delta window, guard baseline); (4) cleanup PR
+(sequenced code removal) — prepare after prod soak; (5) experimental-DAGs
+removal PR decision.
