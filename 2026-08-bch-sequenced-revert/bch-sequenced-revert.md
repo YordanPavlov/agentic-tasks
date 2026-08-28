@@ -253,9 +253,34 @@ starts correctly at 2009-01-09 (no first-month gap on the daily DAG).
   workflow can flake with exit 130 "custom container implementation failed"
   (self-hosted runner) — plain rerun fixes.
 
-**Open threads**: (1) confirm BCH intraday backfill actually kicked off via
-the right DAG + fingerprint check; (2) daily backfill after intraday
-completes; (3) verification suite (seam, sequenced-era diff,
-stack_circulation zero-delta window, guard baseline); (4) cleanup PR
-(sequenced code removal) — prepare after prod soak; (5) experimental-DAGs
-removal PR decision.
+### 2026-08-28 — intraday backfill completed; 1 task failed (bitmex null candle)
+
+Operator ran the full historic re-run via `intraday-metrics-bch-historical`;
+completed except **one** task instance:
+`bch-intraday-bitmex-perpetual-price`, run `scheduled__2024-07-01`
+(interval 2024-07-01 → 2024-08-01), all 4 attempts failed.
+
+- Symptom: pod dies in ~4s inserting into the tmp metric table —
+  `clickhouse_driver.errors.TypeMismatchError` / `struct.error: required
+  argument is not a float` on the `value` column.
+- Root cause (confirmed against live BitMEX API): the UDF history endpoint
+  (`/api/udf/history`, BCHUSD, 5-min) returns exactly one zero-volume gap
+  candle in July 2024 — **2024-07-05 23:55 UTC**, `o/h/l/c = null, v = 0`
+  (8930 candles, 1 null). `_parse_history` in
+  `daily_metrics/job_functions/bitmex_utils.py` takes `json['o']` with no
+  None-filtering, so the null flows into the Float64 insert. June 2024
+  (previous interval) has 0 nulls → succeeded. Deterministic: retries can
+  never succeed, the null is in BitMEX's historical data itself.
+- NOT related to the sequenced revert — bitmex importing jobs were never
+  sequenced; this is a latent importer bug surfaced only because the
+  backfill re-ran a month containing a gap candle.
+- Fix proposed (not yet applied): skip entries with `None` price in
+  `_parse_history` (drop null-OHLC candles ⇒ honest 5-min gap in the
+  metric). Then re-clear the one task instance.
+
+**Open threads**: (1) fix bitmex `_parse_history` null-open handling + PR,
+then clear the failed `bch-intraday-bitmex-perpetual-price` 2024-07 run;
+(2) daily backfill after intraday completes; (3) verification suite (seam,
+sequenced-era diff, stack_circulation zero-delta window, guard baseline);
+(4) cleanup PR (sequenced code removal) — prepare after prod soak;
+(5) experimental-DAGs removal PR decision.
