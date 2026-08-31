@@ -430,13 +430,14 @@ pre-genesis zero-pad 2013-12-08→2014-06-21; 13 scattered days 20y-only).
   on Black Thursday 2020-03-12), frozen since 2021, live matches.
 - **The 100y side is faithful: stored 100y deltas == recompute from today's
   distribution source to the decimal on every step day tested; the frozen
-  20y history is what disagrees with today's source.** I.e. the source's
-  2020 history was revised after the 20y series was computed (vintages
-  2020-07→2025-12 support this; candidate mechanism incl. the d678ad9a
-  INNER-ASOF record loss and later repairs). Which side is *true* is
-  undetermined — resolving likely means re-running the ETH 20y history from
-  the current source (then both sides should be bit-equal), or accepting
-  the 100y as the better-sourced series.
+  20y history is what disagrees with today's source.** Causality established
+  2026-08-31 (see the eval doc's "Causality" section): served values are
+  2020-12 metric snapshots; the source revision is the 2025-12-05→07
+  age-distribution re-population; that run used the pre-`d678ad9a` INNER
+  price join, which dropped every epoch-0 and genesis-era-odt key — those
+  survive as stale 2020-vintage NULL-priced keys in today's source (still
+  un-rewritten). Remediation ordering: post-fix source re-run first, then
+  both metric families.
 
 Per-metric impact evaluation for the team:
 [eth-20y-stale-history-evaluation](eth-20y-stale-history-evaluation.md) —
