@@ -393,6 +393,13 @@ pre-genesis zero-pad 2013-12-08→2014-06-21; 13 scattered days 20y-only).
   the current source (then both sides should be bit-equal), or accepting
   the 100y as the better-sourced series.
 
+Per-metric impact evaluation for the team:
+[eth-20y-stale-history-evaluation](eth-20y-stale-history-evaluation.md) —
+headline: served `stack_circulation_delta_20y` is **negative on Black
+Thursday 2020-03-12** (impossible; 185% error), rc_delta off up to $112M/day,
+and the dollar-age family carries a **permanent +8.2-day bias** at HEAD;
+level metrics ≤0.19%.
+
 ## Open / next
 
 - Map the operator's known master bugfix onto BCH components 1/2 (which days
