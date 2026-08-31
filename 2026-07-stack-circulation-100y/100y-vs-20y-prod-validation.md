@@ -370,41 +370,52 @@ Intraday verdict:
   jumps +397,818 with zero delta** (stale anchor). Net constant gap
   −$622.14M to HEAD.
 
-### rc_cum anchor defect root-caused (2026-08-31): read-after-write race
+### rc_cum anchor defect root-caused (2026-08-31, CORRECTED): concurrency race
 
-NOT the #2345 bug (that fixed the *labeled-balance* cumsum job's 180-day
-lookback). The generic `cumulative_sum_job` anchors each chunk on
-`argMax(value,(dt,computed_at))` over a **1-day window before chunk start**,
-with a silent **`ifNull(prev_value, 0)`** fallback. The backfill ran the cum
-pass as ~211 back-to-back month-chunk queries ~1 s apart (July chunk
-computed_at 14:32:59, August 14:33:00). The August query's anchor subquery
-hit a replica that had not yet received July's insert — one stale read,
-both symptoms in the same query batch (20y and 100y are computed together):
-metric 2624 saw nothing in [07-31, 08-01) → ifNull → **0**; metric 299 saw
-only the old 2021-01-26 row (622,144,895.73 — 100y history had been
-cleared, 20y not) → **stale anchor**. Proven by row vintages at
-dt 2017-07-31 23:55. Quorum inserts don't prevent this — the *read* needs
-`select_sequential_consistency=1` (or same-replica / in_order reads).
-Fix directions: sequential-consistency on the anchor read during historical
-runs + make a missing anchor fatal when prior chunks exist; then re-run the
-intraday rc cum pass (both 20y and 100y) from 2017-08-01 — cheap, the cum
-pass is minutes.
+The re-run went through the **bespoke** `intraday-metrics-bch-historical`
+DAG (clickhouse-tables `airflow/dags/intraday_metrics_bch.py`, from the
+sequenced-revert work), NOT dynamic-custom-historical as first assumed, and
+NOT the generic `intraday-metrics-historical-<ticker>` family. Chunking
+verified from data: calendar-month chunks (`schedule='@monthly'`),
+15-day DMF sub-batches inside each month.
 
-### Start-date question resolved: manual trigger param, not data-derived
+Mechanism — an **out-of-order execution race, not replica lag**:
+- The DAG sets `max_active_runs=10`, `catchup=True`, and default
+  **`depends_on_past: False`**; `build_per_asset_intraday_historical_dag`
+  (utils.py:697) wires intra-run job dependencies from the graph but
+  **drops the per-job `depends_on_past` flag** the graph carries
+  (JobSpec has it; the generic DAG honors it at intraday_metrics.py:158→219).
+- So monthly runs execute concurrently/unordered. The cumsum job anchors
+  each chunk on the previous value in a 1-day lookback with a silent
+  `ifNull(prev_value, 0)` fallback — order-sensitive, and the only
+  order-sensitive job in the suite (which is why the deltas came out
+  perfect and only cums broke).
+- The 2017-08 cum task ran while 2017-07's was still in flight (inserts
+  landed 1 s apart — impossible for sequentially scheduled pods): its
+  anchor read found no 100y July rows (history cleared → ifNull → **0**)
+  and only the old 2021-01-26 row for 20y (not cleared → **stale
+  +397.8k anchor**). One collision in ~211 boundaries — probabilistic.
+- **Host pinning WAS active** (`hist_daily_metrics_v2_job_kwargs` pins via
+  `pinned_clickhouse_host`) and is irrelevant here: the write didn't exist
+  anywhere yet. #2345 (labeled-balance job lookback) also unrelated.
 
-`bch_balances` AND `bch_stacks` both start **2009-01-03 18:15** (BTC
-genesis); only `distribution_deltas_5min` and everything downstream start
-at exactly 2009-02-01 00:00:00. The backfill DAG
-(`dynamic-custom-historical`) takes `start_datetime` verbatim from the
-trigger conf; the range generator (`utils_generators.py:116`) even unions
-the *exact* start into the month chunks — no snapping. So the run was
-simply triggered with `start_datetime = 2009-02-01 00:00:00` while the
-source has January data. (Airflow trigger conf not directly verifiable
-from this container — kubectl exec denied; check the run conf in the UI.)
-**Remedy is cheap, not a complete re-run:** run distribution + delta jobs
-for [2009-01-03, 2009-02-01) only, then re-run the cum pass over full
-history (it must re-run anyway for the anchor fix, and Feb+ deltas are
-per-interval extracts unaffected by January). Then the daily run.
+Fixes: honor `job_spec.depends_on_past` in
+`build_per_asset_intraday_historical_dag` (or `max_active_runs=1` for
+order-sensitive re-runs); make the cumsum anchor fail loudly when prior
+chunks exist; then re-run the intraday cum pass (both families) — minutes.
+
+### Start-date question resolved (CORRECTED): @monthly drops January
+
+`bch_stacks`/`bch_balances` start 2009-01-03 (BTC genesis block); the DAG's
+`start_date = asset_start_dates['bch'] = BTC_START_DATE = 2009-01-09`
+(first spendable block). With **`schedule='@monthly'`** Airflow only creates
+runs for complete calendar intervals *after* start_date — January's
+interval [01-01, 02-01) began before 01-09, so it is silently never
+scheduled; history begins 2009-02-01. Structural, not operator error.
+Remedy: set the bespoke DAG's start_date to 2009-01-01, let the January
+run execute (distribution + deltas for [01-01, 02-01)), then re-run the
+cum pass over full history (needed for the anchor fix anyway; Feb+ deltas
+are per-interval extracts unaffected by January). Then the daily run.
 
 ## ETH after re-run (2026-08-31 sweep)
 
