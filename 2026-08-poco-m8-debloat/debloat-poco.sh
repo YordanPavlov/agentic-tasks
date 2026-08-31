@@ -39,6 +39,18 @@ UNINSTALL_PACKAGES=(
   com.xiaomi.barrage
   com.miui.miservice
   com.mi.appfinder
+  # Added 2026-08-31, third iteration:
+  com.google.android.projection.gearhead  # Android Auto
+  com.facebook.appmanager                 # silent Facebook installer/updater
+  com.facebook.services
+  com.facebook.system
+  com.amazon.appmanager                   # silent Amazon installer/updater
+  com.microsoft.appmanager                # Link to Windows
+  com.microsoft.deviceintegrationservice
+  com.microsoftsdk.crossdeviceservicebroker
+  com.miui.cloudbackup                    # Mi Cloud (unused, no Mi Account)
+  com.miui.cloudservice
+  com.miui.micloudsync
 )
 
 # Only disabled, not uninstalled: with Mi Drop removed the "USB debugging

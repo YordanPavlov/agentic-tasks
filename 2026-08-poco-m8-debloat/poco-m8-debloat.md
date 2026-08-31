@@ -52,3 +52,16 @@ single place for this work; the cheatsheet files were copied here.
 - Home-screen search UI showed ads: that is `com.mi.appfinder` (App Finder).
   Removed it directly and added it to the script (24 → 25 packages).
   Confirmed after reboot: search bar gone. Session closed.
+
+### 2026-08-31
+
+- Third iteration. Script run (`packages-20260831-135439.txt`): nothing
+  resurrected, all 25 packages still gone; Mi Drop re-disabled (the script
+  re-disables it every run).
+- User-driven cleanup of preinstalled apps: removed Android Auto
+  (`com.google.android.projection.gearhead`), the silent Facebook/Amazon
+  installer stubs (`com.facebook.appmanager`/`services`/`system`,
+  `com.amazon.appmanager` — Facebook Messenger itself is kept and unaffected),
+  Link to Windows (`com.microsoft.appmanager` + two service packages), and
+  Mi Cloud (`com.miui.cloudbackup`/`cloudservice`/`micloudsync` — no Mi
+  Account in use). All 11 added to the script (25 → 36 packages).
