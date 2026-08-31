@@ -1,10 +1,6 @@
 # agentic-tasks
 
-Storage for documentation of tasks worked on with agentic help. Each task
-directory is a self-contained journal (runbooks, session logs, analysis
-scripts) — list the task directories to find prior work. Durable residue is
-distilled OUT on close-out: decisions → in-repo ADRs, reusable procedures →
-agent skills, prod defects → tracker issues.
+Storage for documentation of tasks worked on.
 
 ## Conventions
 
@@ -12,5 +8,10 @@ agent skills, prod defects → tracker issues.
   dated by task start. Never create task docs as loose files at the repo root
   (repo-level files `CLAUDE.md`, `README.md` excepted).
 - The directory contains a main doc plus any session logs, runbooks, and
-  analysis scripts. Keep the journal append-only during the task: the top of
-  the main doc says what the task IS; dated session logs say what happened.
+  analysis scripts.
+- **Edit the documents only on request, not mid investigation**, when the
+  user asks for a wrap up, end-of-day summary, etc, then update the documents.
+- **Aim for the docs to stay short**, add information only when it is 
+  meaningfully important for the investigation. If some previous point can
+  be updated, prefer to update then to append.
+  
