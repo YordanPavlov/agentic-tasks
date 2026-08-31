@@ -277,8 +277,12 @@ completed except **one** task instance:
 - Fix proposed (not yet applied): skip entries with `None` price in
   `_parse_history` (drop null-OHLC candles ⇒ honest 5-min gap in the
   metric). Then re-clear the one task instance.
+- **2026-08-31**: fix + regression test on PR
+  [#2346](https://github.com/santiment/clickhouse-tables/pull/2346)
+  (branch `fix-bitmex-null-candle`); after merge + deploy, clear the
+  failed `scheduled__2024-07-01` task instance.
 
-**Open threads**: (1) fix bitmex `_parse_history` null-open handling + PR,
+**Open threads**: (1) bitmex null-candle fix PR #2346 — merge, deploy,
 then clear the failed `bch-intraday-bitmex-perpetual-price` 2024-07 run;
 (2) daily backfill after intraday completes; (3) verification suite (seam,
 sequenced-era diff, stack_circulation zero-delta window, guard baseline);
