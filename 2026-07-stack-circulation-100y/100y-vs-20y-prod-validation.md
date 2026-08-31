@@ -12,10 +12,10 @@ cliff) every 100y series should equal its 20y counterpart. Parent doc:
 |---|---|---|---|
 | BTC | ✅ pass (noise) | ✅ pass (noise) | distribution history re-populated 2026-05-20 post-fixes — clean |
 | LTC | ✅ pass (noise) | ✅ pass (noise) | one *20y-side* defect: 20y intraday cum dropped a 6.25 block 2026-05-31 (cosmetic, unfixed) |
-| BCH | ❌ fail | ❌ fail | separate task (bch-sequenced-revert); raced DELETE + check d678ad9a INNER-ASOF vintage |
-| XRP | ❌ fail (−99.99B) | ❌ fail | circ: epoch-0 sentinel — **fixed by PR #2344**, needs deploy + genesis re-backfill; rc: NULL prices (below) |
+| BCH | 🔶 intraday deltas clean post-re-run (2026-08-31); Jan-2009 source hole −139.2k remains | 🔶 deltas bit-equal; cum broken by anchor bug | daily re-run still pending; see "BCH after re-run" below |
+| XRP | ❌ fail (−99.99B) | ❌ fail | circ: epoch-0 sentinel — **fixed by PR #2344 (merged, verified working on ETH re-run)**, needs genesis re-backfill; rc: NULL prices (below) |
 | DOGE | ✅ pass (noise) | ❌ fail (−$21.4B) | rc: NULL acquisition_price pre-2025-04-08 — needs age-distribution history re-run, then rc_100y re-backfill |
-| ETH | ⏳ not testable | ⏳ not testable | genesis backfill mid-flight (reached 2018-02-07; live rows since 2026-08-20); **needs #2344** — see below |
+| ETH | 🔶 100y faithful to source; −170.5k gap vs stale 20y history | 🔶 same, −$215M | post-re-run 2026-08-31: #2344 confirmed working; residual gap = 2020-era source revisions the frozen 20y never saw — see "ETH after re-run" |
 
 Fixes shipped: **PR #2344** (odt=0 treated as infinitely old — XRP circ, ETH
 pre-emptively). Fixes pending elsewhere: acquisition_price history re-run
@@ -344,6 +344,54 @@ intraday variants. Verified: 20y outputs bit-identical old vs new filter;
 100y filter now reproduces 20y on XRP genesis era exactly. After deploy:
 XRP circ_100y genesis re-backfill (ETH's future backfill correct from
 start).
+
+## BCH after re-run (2026-08-31 sweep)
+
+Intraday backfill fully re-written 2026-08-28→31 (all 8 metrics, from
+**2009-02-01** = first row of the re-derived distribution source, reached
+HEAD). **Daily tables NOT re-run yet** (only live writes) — daily numbers
+still show the old gaps by design.
+
+Intraday verdict:
+- **rc_delta: perfect** — bit-equal on all 1.86M shared points.
+- **circ_delta: bit-equal from 2009-02-01 onward.** All three old gap
+  components (2021 steps −550k, zero-delta window −308k) are GONE from the
+  delta streams except component 1.
+- **Component 1 persists as a source hole:** the re-derived distribution
+  has NO rows before 2009-02-01, while old 20y history has ~139.2k BCH of
+  activity over 2009-01-09..31 (≈2,784 pre-fork blocks × 50 BTC — real
+  early-BTC coins). Jan-2009 metric rows are un-rewritten legacy stubs (20y
+  vintage 2021-01-25, 100y vintage 2026-08-25). circ_cum carries the
+  constant −139,200 offset forever. Needs source-layer backfill of
+  2009-01-09..31 (upstream replay start) or an accept-decision.
+- **rc_cum: cumsum ANCHOR defect at chunk boundary 2017-08-01 00:00.**
+  Deltas identical, cums equal through 2017-07-31 23:55 ($621.75M), then at
+  00:00: **cum_100y resets to literal 0** (wipes $621.7M; the known
+  "cumsum zeroing" bug family, cf. #2345) while **cum_20y jumps +397,818
+  with zero delta** (imported stale old-history anchor). Net constant gap
+  −$622.14M to HEAD. Both sides need their cum jobs re-run with fixed
+  anchoring (post-#2345, correctly sequenced).
+
+## ETH after re-run (2026-08-31 sweep)
+
+100y genesis backfill complete (4,247 days; still has the harmless
+pre-genesis zero-pad 2013-12-08→2014-06-21; 13 scattered days 20y-only).
+
+- **PR #2344 verified working in production:** the epoch-0 profile
+  (−70.9k 2016 / −110.9k 2018 / −131.9k 2020, cum −317k) does NOT appear in
+  the gap (2016 gap is only −1,960) — sentinel rows are being excluded.
+- Remaining gap: circ −170,533 ETH (0.14%), rc −$215M (0.19%), accumulated
+  almost entirely in **2020** (daily steps −5..9k ETH Feb–Jul 2020, +25,237
+  on Black Thursday 2020-03-12), frozen since 2021, live matches.
+- **The 100y side is faithful: stored 100y deltas == recompute from today's
+  distribution source to the decimal on every step day tested; the frozen
+  20y history is what disagrees with today's source.** I.e. the source's
+  2020 history was revised after the 20y series was computed (vintages
+  2020-07→2025-12 support this; candidate mechanism incl. the d678ad9a
+  INNER-ASOF record loss and later repairs). Which side is *true* is
+  undetermined — resolving likely means re-running the ETH 20y history from
+  the current source (then both sides should be bit-equal), or accepting
+  the 100y as the better-sourced series.
 
 ## Open / next
 
