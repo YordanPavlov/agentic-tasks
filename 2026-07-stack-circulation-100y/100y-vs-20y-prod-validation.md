@@ -473,3 +473,16 @@ level metrics ≤0.19%.
 - **XRP live +532M unbalanced-delta drift** (since 2025-04 cutover, bursty,
   pushes circ_20y above max supply): needs its own investigation in the
   Flink→Kafka→CH path.
+
+## Fix PR #2348 (2026-08-31)
+
+**PR #2348 `bch-historical-dag-ordering-and-start`**: (1)
+`build_per_asset_intraday_historical_dag` now passes
+`job_spec.depends_on_past` to `create_job` — restores graph-prescribed
+ordering for cumsums/deltas across all 21 bespoke per-asset historical
+DAGs; (2) BCH historical DAG `start_date` → 2009-01-01 (January no longer
+dropped by `@monthly`). Rollout: after deploy, backfill the Jan-2009 run
+explicitly (cached next_dagrun gotcha), then re-run intraday cum jobs over
+full history (both families), then daily. Flagged in PR: same mid-month
+truncation latent in btc/xrp/ltc/doge bespoke DAGs; loud-anchor cumsum
+failure left as follow-up.
