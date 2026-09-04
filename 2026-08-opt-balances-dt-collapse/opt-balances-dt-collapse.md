@@ -6,9 +6,10 @@
   with sub-second block times. Started from `opt_erc20_balances`
   (negative holder counts); turned out to be a **class of defect** across
   several chains and both balances and stacks tables.
-- **Status 2026-09-01:** fix direction chosen; **4 re-keyed tables deployed
-  and back-filling** from Kafka. Next: wait for catch-up, QA against the
-  current tables, then switch and continue with the remaining tables.
+- **Status 2026-09-04:** the first 4 re-keyed tables **passed QA and are
+  live** — Distributed tables switched, old shards dropped. Next: metric
+  re-runs over the damaged ranges, then the remaining tables
+  (avax balances first — still accruing damage).
 - **Root cause:** these tables are `ReplacingMergeTree` with `dt` (second
   resolution) in the sorting key instead of `blockNumber`. When a chain puts
   several blocks in one second, one address gets several rows with identical
@@ -61,17 +62,102 @@ would also fix the collapse, but `dt` is derived data: a corrected block
 timestamp would then create a new row instead of replacing the old one.
 `PARTITION BY toStartOfMonth(dt)` stays, so dt-range pruning is unchanged.
 
-## Deployed 2026-09-01 — back-filling
+## SWITCHED 2026-09-04 — first 4 tables live on v2
 
-| Table | Key | Progress (local shard, 11:05) |
-|---|---|---|
-| `opt_erc20_balances_v2_shard` | `assetRefId, address, blockNumber` | 375M rows, partition 2025-03 — **pre-Bedrock era complete, QA can start** |
-| `opt_erc20_stacks_shard_v2` | `assetRefId, address, sign, blockNumber, nonce` | 318M rows, partition 2023-07 |
-| `arb_erc20_stacks_shard_v5` | `assetRefId, address, sign, blockNumber, nonce` | 205M rows, partition 2023-04 |
-| `polygon_balances_shard_v2` | `address, blockNumber` | 80M rows, partition 2022-06 |
+Distributed tables repointed and old shards dropped (operator, 2026-09-04):
+`opt_erc20_balances` → `opt_erc20_balances_v2_shard`, `opt_erc20_stacks` →
+`opt_erc20_stacks_shard_v2`, `arb_erc20_stacks` → `arb_erc20_stacks_shard_v5`,
+`polygon_balances` → `polygon_balances_shard_v2`. Verified via
+`system.tables.engine_full`.
 
-Plan: wait for catch-up → compare against the current tables → switch →
-proceed to the remaining tables.
+## QA verdict (2026-09-04): all 4 pass — strict supersets, nothing missing
+
+All counts are deduplicated keys (`GROUP BY` new ORDER-BY key), full history,
+cutoff 2026-09-03. Evaluated via temporary `test.*_test` Distributed tables.
+
+| Table | v1 rows | v2 rows | Recovered | Fully-lost blocks¹ | Damage window |
+|---|---|---|---|---|---|
+| `opt_erc20_balances` | 3,177.5M | 3,344.8M | **167.3M (5.3%)** | **8,171,421** | 2021-11 → 2023-06 |
+| `polygon_balances` | 2,031.8M | 2,031.9M | 29,979 | 71 | 2022-02 → 2023-12 + 2025-09-10 gap |
+| `opt_erc20_stacks` | 9,100.6M | 9,100.6M | 3,808 | 0 | 2025-12-22 gap only |
+| `arb_erc20_stacks` | 8,378.8M | 8,378.8M | 4,051 | 10 | 2025-12-22 gap only |
+
+¹ blocks that vanished from v1 entirely — every record overwritten by a
+same-second successor.
+
+Evidence, in increasing strength:
+
+1. **Continuity** (`oldBalance[N] == balance[N-1]`, 1% address sample): opt
+   v1 had 304,434 breaks + 1,973 impossible-genesis rows; polygon v1 122
+   breaks; **v2 = 0 everywhere**.
+2. **End-state equality** (last row per key at cutoff): zero keys missing
+   either side; only diffs are 1-ULP float-parse noise (max 2.2e-16 rel —
+   today's CH parses the same Kafka bytes with different last-bit rounding).
+3. **Row-level anti-joins** (1% balances / 0.2% stacks samples, all months):
+   **v1-only = 0 everywhere**; v2-only confined to the damage windows.
+4. **XOR fingerprint** (groupBitXor over ALL distinct key hashes, per month,
+   full coverage — not a sample): every equal-count month (213 across the 4
+   pairs) is **provably identical**; only superset months differ.
+5. Reproducer address shows all 10 links in v2 (v1: 2).
+6. v2's unmerged same-key duplicates (opt_stk 2024-10, arb_stk 2021-09, pol
+   2020-21) carry byte-identical values on real addresses — merge fodder,
+   not conflicts. Only value-conflicting keys: 42k polygon `TOTAL` sentinel
+   rows differing in txID only (v1 has the same ambiguity).
+
+**Damage assessment of the old data:** `opt_erc20_balances` was the
+disaster — inside its 20-month window **38.7% of transitions were missing**
+(worst month 2022-01: 65.8%); 98.1% of pre-Bedrock blocks shared their
+second with another block. Extrapolated: ~29.5M broken chains, ~190k
+addresses with lost genesis rows. End states were intact — the corruption
+was entirely in the *path*, exactly what delta/holders/network-growth
+consume. The other three tables were scratches.
+
+**Two incidents discovered incidentally, both healed by the re-ingest:**
+
+- **2025-12-22 02:37–02:39 UTC consumer drop** — the *entire* diff of both
+  stacks tables (3,808 opt + 4,051 arb rows, 10 arb blocks fully gone; opt
+  balances unaffected). Checked all other balances/stacks tables per-minute
+  around the window: no dips (caveat: a partial drop this small is only
+  provable by re-ingest diff). Stacks-fed metrics for that day need a re-run.
+- **polygon_balances 2025-09-10 04:00–06:00** partial gap (385 keys).
+
+**Key empirical surprise:** the dt-collapse **never actually fired in any
+stacks table** — the `nonce` in the old key absorbed every same-second
+collision on opt AND arb ("was accruing" in the matrix below was wrong).
+All real collapse damage lives in balances tables. Stacks re-keying is
+still right (correct identity, healed the gap), but it's not urgent.
+
+## Remaining affected tables (2026-09-04 survey of live sorting keys)
+
+Measured damage: chain breaks on 1% address sample (×97 ≈ table-wide).
+
+| Table | Sampled breaks | Est. lost rows | Priority |
+|---|---|---|---|
+| `avax_erc20_balances` (shard_v2) | 12,117 — **8,483 in 2026 YTD** | **~1.2M, compounding** | **1 — accelerating**: multi-block s/month ~600 (early 2025) → 59,349 (2026-06) |
+| `avax_erc20_stacks` (shard) | n/a | likely ~0 (nonce) but avax collision rate ~100× opt/arb | 2 — same re-ingest batch as avax balances |
+| `polygon_erc20_balances` (shard_v2) | 1,372 + 75 bad-genesis | ~133k + ~7k genesis | 3 — historical (bulk 2022, ~20/yr by 2025) |
+| `polygon_stacks` (shard_v2) | n/a | likely ~0 | 3 — chain had only 8,400 shared-second blocks ever |
+| `xrp_stacks_shard_v8` | n/a | ≤ a handful | 4 — exactly ONE multi-ledger second ever (2025-08-09 03:00:30, 10 ledgers); fold into future XRP work. **Matrix correction:** xrp stacks key is `contractAddress, address, sign, dt, nonce` — no blockNumber, contrary to the matrix below. |
+
+**Cleared with data:** `bep20_balances_exact_v3_shard` — BSC is now the most
+sub-second chain of all (9.7M excess blocks Jun–Aug 2026) but `txID` in its
+key keeps same-second rows distinct: 0 chain breaks in the sub-second-era
+sample. All UTXO/eth/erc20/icp/icrc + `xrp_balances`: safe keys or slow
+blocks.
+
+## What's left to be done
+
+1. **Metric re-runs** for the 4 switched tables (scope section below):
+   opt Tier-1 chronologically over 2021-11 → 2023-06, Tier-2 (cumsums,
+   composite) through today; polygon equivalents over its windows;
+   one-day re-run around **2025-12-22** for opt/arb stacks-fed metrics
+   and **2025-09-10** for polygon balances-fed ones.
+2. **avax_erc20_balances_v3** (+ avax stacks) — deploy re-keyed tables,
+   same Kafka re-ingest recipe. Only table still actively accruing damage.
+3. **polygon_erc20_balances + polygon_stacks** re-key — no urgency.
+4. Drop the `test.*_test` evaluation Distributed tables (operator).
+5. Consider table_qa test files for the switched tables to lock in expected
+   values (santiment-add-table-qa-tests skill).
 
 ## Affected tables — full matrix
 
@@ -195,3 +281,28 @@ kcat); `kafka-python` works but is flaky through the proxy.
 - Deployed and started back-filling: `opt_erc20_balances_v2_shard`,
   `opt_erc20_stacks_shard_v2`, `arb_erc20_stacks_shard_v5`,
   `polygon_balances_shard_v2`.
+
+### 2026-09-04 — QA passed, tables SWITCHED
+
+- Backfill caught up (max dt equal to old tables). Operator deployed
+  `test.*_test` Distributed tables for evaluation.
+- Ran the full QA ladder (see QA verdict section): per-month deduped key
+  counts, continuity, end-state equality, row-level anti-joins on samples,
+  and a full-coverage per-month XOR fingerprint over all distinct keys.
+  All 4 tables strict supersets of old; recovered rows only in explicable
+  windows; zero rows missing.
+- Quantified old-data damage (opt balances: 167M rows / 8.2M whole blocks
+  lost, 38.7% of the window). Discovered + healed two unrelated ingestion
+  incidents (2025-12-22 stacks consumer drop, 2025-09-10 polygon gap).
+- Established the nonce actually prevented all stacks-table collapse on
+  both chains — damage class is balances-only in practice.
+- Surveyed all remaining balances/stacks sorting keys on the live cluster;
+  measured remaining damage (avax accelerating, ~1.2M rows; polygon erc20
+  historical ~140k; xrp stacks one second of exposure; bep20 cleared by
+  txID in key).
+- Operator switched the 4 Distributed tables to v2 shards and dropped the
+  old shard tables. Verified via `system.tables`.
+- Gotchas for next time: `readonly` gets 600s max_execution_time (pass
+  `--receive_timeout` too for long queries); double-distributed IN needs
+  GLOBAL; v1 tables carried millions of unmerged identical duplicates from
+  historical double-computations — only deduped counts are comparable.
