@@ -6,10 +6,11 @@
   with sub-second block times. Started from `opt_erc20_balances`
   (negative holder counts); turned out to be a **class of defect** across
   several chains and both balances and stacks tables.
-- **Status 2026-09-04:** the first 4 re-keyed tables **passed QA and are
-  live** — Distributed tables switched, old shards dropped. Next: metric
-  re-runs over the damaged ranges, then the remaining tables
-  (avax balances first — still accruing damage).
+- **Status 2026-09-08:** the first 4 re-keyed tables **live** since 09-04.
+  **avax balances v3 backfilled and passed the full QA ladder** (devops
+  PR #6001) — ready to switch; avax stacks v2 backfill/QA pending. Next:
+  metric re-runs over the damaged ranges, remaining tables (polygon erc20,
+  xrp stacks) unhurried.
 - **Root cause:** these tables are `ReplacingMergeTree` with `dt` (second
   resolution) in the sorting key instead of `blockNumber`. When a chain puts
   several blocks in one second, one address gets several rows with identical
@@ -127,14 +128,50 @@ collision on opt AND arb ("was accruing" in the matrix below was wrong).
 All real collapse damage lives in balances tables. Stacks re-keying is
 still right (correct identity, healed the gap), but it's not urgent.
 
+## avax balances v3 QA (2026-09-08): PASS — strict superset, bug fixed
+
+Deployed via devops PR #6001 (`avax_erc20_balances_shard_v3`, ORDER BY
+`(assetRefId, address, blockNumber)`; also `avax_erc20_stacks_v2_shard`,
+same recipe). PR review notes: the real Distributed CRs were renamed to
+`-test` in git (installer has no prune, live tables untouched) — the
+**switch PR must restore them, with `facing_cluster` back in `clusters`**,
+and orphaned v1/v2 stream+MV+shard CRs need explicit `kubectl delete` at
+cleanup. Evaluated via `test.avax_erc20_balances_test` Distributed table;
+cutoff 2026-09-08 00:00, both tables tailing to the same second.
+
+- **Recovered: 3,373,302 deduped keys** (~0.14% of 2.36B; ~3× the 1%-sample
+  estimate). Two damage windows, as predicted: **2021-02 → 2021-11** (~1.6M,
+  peak 2021-08/09 ≈ 460k/mo — 2021 bull-run sub-second era; trickle of
+  tens–hundreds/mo through 2025) and **2026-01 → today** (~1.7M,
+  accelerating 7.8k Jan → 490k Jun) — "still accruing" confirmed.
+  2025-12 recovered exactly 0 (clean era boundary).
+- **Continuity** (1% sample, 18.1M rows): v2 = 12,207 chain breaks;
+  **v3 = 0 breaks, 0 impossible-genesis**.
+- **Key set + end states** (full coverage, XOR fingerprints): identical
+  86,668,622 `(assetRefId, address)` keys; every key's final blockNumber
+  identical; final balances differ only by 1-ULP parse noise (2,237/881,647
+  sampled keys, max rel 2.2e-16, 0 real diffs).
+- **Anti-joins** (1% sample): v2-only = 0; v3-only confined to the damage
+  windows (2021: 5,098; 2026: 8,647; 92 total 2023–25).
+- **Equal-count months** (2017-07, 2020-10/11/12, 2021-01, 2025-12 —
+  the last 97.4M keys, full coverage): bit-identical by XOR fingerprint.
+- **v3 dup keys**: 52,631 in sample, **0 value conflicts** (incl. txID) —
+  merge fodder only.
+- Query gotcha: XOR fingerprints must take ONE hash per key
+  (`any(cityHash64(...))` inside the GROUP BY) — `groupBitXor` inside the
+  key group cancels even-multiplicity duplicates and false-alarms.
+
+Metric re-run scope for avax: Tier-1 over **both** windows, cumsums +
+composites through today.
+
 ## Remaining affected tables (2026-09-04 survey of live sorting keys)
 
 Measured damage: chain breaks on 1% address sample (×97 ≈ table-wide).
 
 | Table | Sampled breaks | Est. lost rows | Priority |
 |---|---|---|---|
-| `avax_erc20_balances` (shard_v2) | 12,117 — **8,483 in 2026 YTD** | **~1.2M, compounding** | **1 — accelerating**: multi-block s/month ~600 (early 2025) → 59,349 (2026-06) |
-| `avax_erc20_stacks` (shard) | n/a | likely ~0 (nonce) but avax collision rate ~100× opt/arb | 2 — same re-ingest batch as avax balances |
+| `avax_erc20_balances` (shard_v2) | 12,117 — **8,483 in 2026 YTD** | **~1.2M, compounding** (actual recovered: 3.37M) | **v3 QA-passed 2026-09-08, awaiting switch** |
+| `avax_erc20_stacks` (shard) | n/a | likely ~0 (nonce) but avax collision rate ~100× opt/arb | 2 — v2 deployed with #6001, backfill/QA pending |
 | `polygon_erc20_balances` (shard_v2) | 1,372 + 75 bad-genesis | ~133k + ~7k genesis | 3 — historical (bulk 2022, ~20/yr by 2025) |
 | `polygon_stacks` (shard_v2) | n/a | likely ~0 | 3 — chain had only 8,400 shared-second blocks ever |
 | `xrp_stacks_shard_v8` | n/a | ≤ a handful | 4 — exactly ONE multi-ledger second ever (2025-08-09 03:00:30, 10 ledgers); fold into future XRP work. **Matrix correction:** xrp stacks key is `contractAddress, address, sign, dt, nonce` — no blockNumber, contrary to the matrix below. |
@@ -152,8 +189,10 @@ blocks.
    composite) through today; polygon equivalents over its windows;
    one-day re-run around **2025-12-22** for opt/arb stacks-fed metrics
    and **2025-09-10** for polygon balances-fed ones.
-2. **avax_erc20_balances_v3** (+ avax stacks) — deploy re-keyed tables,
-   same Kafka re-ingest recipe. Only table still actively accruing damage.
+2. **avax_erc20_balances_v3**: QA passed — switch the Distributed table
+   (restore real CRs + facing_cluster in the switch PR), then Tier-1
+   re-runs over 2021-02→2021-11 and 2026-01→today, cumsums/composites
+   through today. **avax stacks v2**: QA once backfill catches up.
 3. **polygon_erc20_balances + polygon_stacks** re-key — no urgency.
 4. Drop the `test.*_test` evaluation Distributed tables (operator).
 5. Consider table_qa test files for the switched tables to lock in expected
@@ -169,8 +208,8 @@ A dt-keyed table is affected iff its chain has ever had >1 block in a second.
 | `opt_erc20_stacks_shard_v1` | yes, not accruing | same window. **v2 deployed** |
 | `arb_erc20_stacks_shard_v4` | yes, was accruing | Arbitrum still sub-second. **v5 deployed** |
 | `arb_erc20_balances_shard_v4` | no | already re-keyed 2024 (devops #4388) |
-| `avax_erc20_balances_shard_v2` | **yes, still accruing** | rate rose ~200x in 12 months (0.002% → 0.49% of keys). No v3 yet — highest priority |
-| `avax_erc20_stacks_shard` | **yes, still accruing** | same chain |
+| `avax_erc20_balances_shard_v2` | **yes, still accruing** | rate rose ~200x in 12 months (0.002% → 0.49% of keys). **v3 QA-passed, awaiting switch** |
+| `avax_erc20_stacks_shard` | **yes, still accruing** | same chain. **v2 deployed, backfill/QA pending** |
 | `polygon_balances_shard_v2` | in progress | native POL. **v2 deployed** |
 | `polygon_erc20_balances_shard_v2` | yes, not accruing | multi-block seconds in 2023; none on recent sampled days |
 | `polygon_stacks_shard_v2` | yes, not accruing | same |
@@ -306,3 +345,18 @@ kcat); `kafka-python` works but is flaky through the proxy.
   `--receive_timeout` too for long queries); double-distributed IN needs
   GLOBAL; v1 tables carried millions of unmerged identical duplicates from
   historical double-computations — only deduped counts are comparable.
+
+### 2026-09-08 — avax balances v3 QA passed
+
+- Reviewed devops PR #6001 (avax balances v3 + stacks v2): matches the
+  opt/arb precedent exactly (keys, codec drops, LowCardinality→String);
+  `clickhouse-aws` vs `clickhouse.production.san` is cosmetic (installer
+  patch overwrites `clickhouseService`). Flagged: real Distributed CRs
+  now unmanaged in git — switch PR must restore them + facing_cluster.
+- Backfill caught up; ran the full QA ladder on
+  `test.avax_erc20_balances_test` vs live — PASS (section above).
+  3.37M keys recovered; damage windows 2021-02→11 and 2026-01→today.
+- Big-aggregation gotchas: `uniqExact` on raw tuples over 2×2.4B rows
+  OOMs (100 GiB) — hash the key and pass
+  `--max_bytes_before_external_group_by`; XOR fingerprint needs one hash
+  per key (`any()`), not `groupBitXor` inside the key group.
