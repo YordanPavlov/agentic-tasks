@@ -138,6 +138,71 @@ shared source schema).
   **ParseBalancesEmptyBlockTest** (incident regression, empty ledger across keyBy);
   pipeline equivalence test passes with unchanged expectations. 144/144 green.
 
+### Decision record: why the Scala→Java data-model migration
+
+Written down in full because this decision may need to be revisited/justified later.
+
+**The forcing event.** Flink 2 removed the Scala API (`flink-scala`). On Flink 1.x every stream
+type of this pipeline was serialized by dedicated Scala serializers (CaseClassSerializer,
+Option/Traversable serializers) — compact positional binary, no Kryo anywhere. On Flink 2 the
+Java TypeExtractor analyzes the same Scala case classes, cannot see them as POJOs (immutable
+fields, no setters/no-arg ctor: the "cannot be used as a POJO type... processed as GenericType"
+log lines), and drops EVERY model type onto the generic Kryo fallback. So the migration to
+Flink 2 silently changed the serialization regime of the whole model; nothing in the code
+changed and nothing warned beyond INFO logs.
+
+**Why Kryo-on-Scala is not acceptable, with evidence:**
+
+1. *Correctness — singleton identity.* Kryo's default path materializes fresh instances of
+   Scala's singleton objects. Two production incidents from one root cause family:
+   `scala.None` copies failing match clauses (earlier; answered with NoneSerializer/
+   SomeSerializer), and `scala.Nil` copies failing `List.isEmpty` — which in Scala 2.13+/3 is
+   literally `this eq Nil` — so `foreach` calls `head` on an "non-empty" empty list:
+   the 2026-09-10 xrp-balances-v6 crash on the FIRST empty ledger. The failure is
+   data-shape-dependent and latent: a job runs fine until the poisonous value shape arrives.
+   Per-singleton serializer registration is whack-a-mole against an open set (every
+   identity-sensitive singleton in every transitively reachable Scala type).
+2. *Performance.* Kryo's reflective generic path is ~2–4x slower than Flink's POJO serializer
+   (Flink's own benchmarks) and writes class metadata per object graph node. The tax lands on
+   every chained-operator copy (CopyingChainingOutput serializes even within a chain), every
+   keyed shuffle, and every serialized state op — i.e. exactly the per-record hot path the
+   pre-grouper exists to relieve.
+3. *Evolution & fragility.* Flink supports NO schema evolution for Kryo state; Kryo field
+   serialization reflects over Scala's synthetic fields, so even a Scala compiler upgrade is a
+   state-compat hazard. POJO/record serialization has documented evolution rules.
+
+**Alternatives weighed:**
+
+- *A — register a NilSerializer* (drafted, reverted): fixes the two KNOWN singletons only;
+  leaves the perf tax, the evolution gap, and the open set of future singletons. Kept as the
+  fallback recommendation for OTHER jobs still on the Scala model.
+- *B — chill-scala AllScalaRegistrar:* proper Scala collection serializers for Kryo, but
+  Flink-2/Kryo-5 compatibility unverified and still the Kryo perf profile.
+- *C2 — TypeInfoFactory per case class:* non-Kryo and fast, but bespoke per-type Scala plumbing
+  that would be discarded if the model ever moves to Java — investment in the wrong layer.
+- *C1 — Java records/POJOs for boundary-crossing types (CHOSEN):* the data-model layer is the
+  ONLY layer Flink introspects; the logic layer (BalancesCalculation, process functions) is
+  plain JVM code Flink never looks inside, where Scala costs nothing. Converting just the model
+  captures the entire runtime benefit of "rewrite in Java" (native serializers, no identity
+  traps, schema evolution) at a fraction of the cost and risk — no consensus-critical logic was
+  transcribed.
+
+**Why the moment was right:** backward state compatibility was a non-issue (fresh-deploy
+rollout; v6 was already state-incompatible with v5), and the output contract was pinned
+byte-identical by the golden JSON test before the conversion started, so the change is provably
+behavior-preserving (pipeline equivalence test expectations unchanged).
+
+**Guard against regression:** KryoFreeModelTest fails the build if any converted type (or a
+future field added to one) extracts to GenericTypeInfo again.
+
+**Standing scope note / when to revisit:** only XRP balances is converted. Every other
+Flink-2-migrated job still runs its Scala model on Kryo with the None/Some registrations and
+the latent Nil hazard (first empty Scala List crossing a boundary). The intended path is to
+convert each job's model at its own rerun boundary, XRP-style; if that never happens for a job,
+it needs at least the NilSerializer registration. Revisit the Java-model decision itself only
+if Flink regains first-class Scala type support upstream — nothing else observed so far argues
+the other way.
+
 ### Next steps
 
 1. Review + commit the Java-model change on `xrpAsyncState`; then image build.
