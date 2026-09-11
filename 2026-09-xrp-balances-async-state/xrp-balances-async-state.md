@@ -3,12 +3,11 @@
 Migrate the XRPBalances Flink job to the async state API (state V2 / ForSt), following the
 ETH stacks pattern (PR #306), and clean up the design issues surfaced along the way.
 
-**Status (2026-09-10):** first prod deploy attempt done and repaired (bucket propagation +
-Flink 2.3 FAILED-app wedge); it surfaced the Kryo/Nil crash on the first empty ledger, answered
-by converting the whole XRP balances data model to Java records/POJOs (Kryo-free) —
-**uncommitted on `xrpAsyncState`, awaiting review**, 144 tests green. After commit: image
-build, tag bump in devops values, redeploy. Devops side (ForSt profile + xrp-balances-v6)
-committed on `xrpBalancesForst` through `5c05777a5`.
+**Status (2026-09-11):** Java model committed; correction-funnel fix `29c50449` (heap buffers,
+union state at barriers) **deployed to hprod and evaluated: ~40–80x throughput, checkpoints
+7 min → 21 s**. New bottleneck is the `Order_balances` constant-key stage (explains the
+remaining TM CPU skew); in-progress edits on branch `adoptJavaTypes`. Devops side (ForSt
+profile + xrp-balances-v6) committed on `xrpBalancesForst` through `5c05777a5`.
 
 ## What the branch contains (oldest first)
 
@@ -213,3 +212,52 @@ the other way.
    (hash-multiset, as stacks).
 4. Parked: autoscaler block for the backfill lifecycle; `job.restart.failed` operator option;
    Kafka tooling unreachable from agent container (separate session planned).
+
+## 2026-09-11 — heap correction buffers + deploy: correction funnel eliminated (~40–80x)
+
+Work now continues on branch `adoptJavaTypes` (continuation of `xrpAsyncState`; contains it).
+Committed since the last entry:
+
+- `807f5458` + `d5d02395` — the Java data model (option C above) committed after review;
+  `Balance` further converted from mutable POJO to a record.
+- `29c50449` — **timestamp correction buffers moved to heap, spilling to state at barriers.**
+  The correction funnel (keyBy on a constant key) was the pipeline's throughput ceiling: it
+  spent ~1.3 ms/record on the per-record ForSt round trip of the inherited drain buffer
+  (put on arrival, get+delete at drain) — measured saturated at 787 records/s on hprod while
+  every other subtask idled. Records waiting for their block's correction now sit in a heap
+  TreeMap inside a hand-rolled operator (`CorrectBlockTimestampsOperator` replaces
+  `CorrectBlockTimestampsProcess`); only records still waiting at a checkpoint barrier are
+  written out, as **union operator state** re-claimed on restore by the subtask owning the
+  constant key. Steady-state state traffic at the stage is zero; the stage no longer uses
+  async state at all. Trade: the alignment envelope (`sourceWatermarkAlignmentBlocks`) is now
+  a heap commitment at this operator, and a restore briefly ships every subtask a full buffer
+  copy (envelope-bounded to tens of MB).
+
+### Deploy evaluation (hprod, xrp-balances-v6)
+
+Image `29c50449` live since 13:33 UTC. The same morning (07:35–13:15 UTC) ran the pre-commit
+build under the same deployment name, and both runs were in backfill catch-up
+(throughput-limited), so Prometheus gives a clean A/B:
+
+| Metric | pre-commit (10:00–13:15) | `29c50449` (13:35–13:52) |
+|---|---|---|
+| `Correct_block_timestamps` output | ~300–800 rec/s (the 787 ceiling) | **30–46k rec/s** |
+| correction subtask busy time | pinned at 1000 ms/s | ~130 ms/s, mostly backpressured |
+| Kafka sink throughput | ~150–470 rec/s | **~34k rec/s** (~80x) |
+| checkpoint duration | 4–7.5 min | **~21 s** |
+
+The checkpoint collapse is the direct signature of the change — per-record ForSt traffic at
+the correction stage is gone.
+
+**New bottleneck / the remaining TM CPU skew:** the hottest subtask is now the
+`Order_balances → Map → Kafka sink` chain (constant-key subtask, ~885 ms/s busy); everything
+upstream is backpressured ~700–830 ms/s waiting on it. Its TM burns ~2.4 cores while the
+others sit at ~0.4–0.6 — the skew is structural (parallelism-1 sorted-output contract), not a
+scheduling artifact. That stage was only ~160–190 ms/s busy pre-commit; the correction fix
+consumed its ~5–6x headroom. It is the next lever (working tree has in-progress edits to
+`OrderBalancesProcess` et al., uncommitted).
+
+**Incidental restore-path validation:** one job restart at 13:42 UTC — `taskmanager-1-6`
+never started (ECR image-pull i/o timeouts on node `freya`; node-local registry connectivity
+issue, worth watching), Flink replaced it with `taskmanager-1-7` and the job recovered at full
+rate. First real exercise of the new union-state snapshot/restore path passed.
