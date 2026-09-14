@@ -1,7 +1,7 @@
 # Historic metrics release process
 
 **Started:** 2026-09-14
-**Status:** problem definition — base for brainstorming
+**Status:** direction selected (2026-09-14 brainstorm) — experimental-tables test runs
 **Repo:** `clickhouse-tables` (DMF + Airflow DAGs in `airflow/`)
 
 ## Problem statement
@@ -26,102 +26,136 @@ and letting it re-run, which has two defects:
 Implicit third defect: **(c) no rollback.** Once merges collapse the
 ReplacingMergeTree, the old version's rows are gone.
 
-## Why it behaves this way (mechanics)
+## Mechanics (verified on prod 2026-09-14)
 
 - Metrics land in shared tables `daily_metrics_v2` / `intraday_metrics`:
   `ReplicatedReplacingMergeTree(computed_at)`, `ORDER BY (asset_id,
-  metric_id, dt)`, partitioned by `metric_id`. **Replicated, not
-  sharded — there is no Distributed layer to switch** (unlike sources).
-- The canonical read is `argMax(value, computed_at)` — latest write wins
-  immediately. "Release" is a side effect of insertion, not a step.
-- Recompute = clear runs of the per-asset historical DAGs
-  (`intraday-metrics-{ticker}-historical`, `daily-metrics-historical-{ticker}`,
-  monthly intervals, catchup). Destination tables are config knobs
-  (`DAILY_DAILY_METRICS_TABLE` / `DAILY_INTRADAY_METRICS_TABLE` env vars
-  exist) but all DAGs point at the live tables.
-- Downstream fan-out complicates any table swap: MVs
-  `*_to_metrics_store_mv` → `metrics_store` (filtered subset),
-  `intraday_metrics_dt_optimization_mv`, `intraday_metrics_historic_optimization`;
-  plus replication of facing tables to the client-facing cluster.
-- Metric-level versioning exists only in metadata
-  (`metric_metadata_versioned`, `status: production`, version label on
-  specs) — it versions *definitions*, giving each version a new
-  `metric_id`; it is not designed for re-releasing the *same* definition
-  over corrected sources (id churn for every affected metric per
-  incident would be its degenerate use).
+  metric_id, dt)`. **Partitioning: `daily_metrics_v2` is UNPARTITIONED;
+  `intraday_metrics` is `PARTITION BY toYYYYMM(dt)`** (the earlier
+  "partitioned by metric_id" claim was wrong — kills per-metric
+  REPLACE PARTITION ideas). Replicated, not sharded — no Distributed
+  layer to switch.
+- The canonical read is `argMax(value, computed_at)` — **write = release**.
+  This one decision produces all three defects.
+- MV fan-out on INSERT into the live tables (bypassed by ATTACH/swap;
+  fires on any insert, including unwanted ones):
+  `daily_metrics_v2_to_metrics_store_mv` / `intraday_metrics_to_metrics_store_mv`
+  → `metrics_store` (filtered via `filter_metric_ids`/`filter_asset_ids`),
+  `intraday_metrics_dt_optimization_mv`, `intraday_metrics_historic_optimization`,
+  `available_intraday_metrics_mv`, sql_exporter health MVs. Inbound:
+  `mv_intraday_metrics_pit_transfer` (`intraday_metrics_pit` →
+  `intraday_metrics`) — part of the intraday write path.
+- Destination tables are config knobs (`daily_metrics/config.py`:
+  `daily_metrics_table`, `intraday_metrics_table`,
+  `sink_intraday_metrics_table`, `delta_futures_table`,
+  `address_profit_table`, … — env-settable with `DAILY_` prefix). The
+  knob list is effectively the manifest of every table a run touches.
+- **All intermediates are also `ReplicatedReplacingMergeTree(computed_at)`**
+  (delta futures ×2, `distribution_deltas_5min`, `address_profit`,
+  label-based tables, availability, job progress) — uniform semantics
+  across the whole table set.
 
-## Existing assets / prior art
+## Selected design: experimental-tables test runs (simple, partial goals)
 
-- `daily_metrics_v2_experimental` / `intraday_metrics_experimental`
-  tables on prod + `*-experimental` bespoke DAG copies (used ad hoc for
-  code experiments via image-tag pinning; DAG copies are hand-maintained
-  and slated for removal).
-- `*_guard` tables + nightly metrics-regression-guard: recomputes
-  baseline metrics into a side table and diffs vs served — already the
-  "compute aside and compare" pattern, but for detection, not release.
-- `intraday_metrics_pit` (plain MergeTree) — point-in-time capture.
-- Source-side switch runbook (opt-balances dt-collapse, avax v3): proven
-  QA-then-switch flow that this task wants to replicate one layer up.
+Reuse the existing always-on `*_experimental` clone tables as a shared
+staging environment. Flow per repair:
 
-## Goal
+1. **Test run**: historical DAG(s) run with (i) optionally a pinned
+   custom `clickhouse-tables` image and (ii) a switch that redirects
+   **all** output-table knobs to the `_experimental` set. Data lands
+   invisibly; realtime untouched.
+2. **QA at leisure**: diff experimental vs live (guard machinery /
+   `compare_metrics_with_reference.py` / table_qa-style gates).
+3. **If approved**: snapshot the scope's served values from live (cheap
+   insurance), then clear the main historic DAG and re-run to live as
+   today. **Double compute, very simple mental model.**
 
-A release process for recomputed historic metrics with the same
-properties the source layer already has:
+Scorecard: fixes (a) fully (inspection window), keeps realtime writing
+(goal 5). Deliberately gives up atomic go-live (b) and real rollback (c)
+— the live re-run is still incremental & irreversible. Accepted trade.
 
-1. Full recompute lands somewhere **not visible to consumers**.
-2. **Inspection window**: arbitrary old-vs-new comparison before release
-   (table_qa-style gates, guard-style diffs, manual analysis).
-3. **Atomic go-live** (seconds, all intervals at once), ideally scoped
-   (per asset / per metric set affected by the source fix).
-4. **Rollback** for some grace period.
-5. Realtime DAGs keep writing throughout (the tip must not go stale
-   during the days-long recompute, and the switch must not lose the
-   tip).
+### Build items
 
-## Constraints
+- **DAG factory flag, not cloned DAG files**: parameterize the existing
+  historical DAG factory with image override + experimental-tables
+  switch. The switch must flip the knobs **as an all-or-nothing set** —
+  a partial flip is exactly how pollution happens. Deletes the
+  hand-maintained `*-experimental` DAG copies.
+- **Grants over convention**: dedicated CH user for experimental mode
+  with write grants only on `%_experimental` — a missed knob fails
+  loudly instead of writing to prod (kills the 07-07 leak class).
+  Highest-value hardening; insist on it.
+- **Fill the table-set gaps** (verified 2026-09-14): experimental
+  variants exist for finals, delta futures ×2, distribution_deltas,
+  label-based ×3, dt_optimization, available_metrics, metric_metadata,
+  metrics_by_name. **Missing: `address_profit`** (P/L state — real
+  pollution risk), `available_signals`, historic_optimization inner
+  table, `intraday_metrics_pit` (if sink path used). Generated DDL;
+  mind explicit ZooKeeper paths (`/clickhouse/tables/global/…`) —
+  clones need fresh ZK paths.
+- **Truncate step** at test-run start — stale rows from prior
+  experiments poison the QA diff and availability. One experiment per
+  chain at a time (different chains coexist fine).
+- **Snapshot before clearing live**: dated `INSERT SELECT` of the
+  scope's served values → rollback = re-insert with fresh computed_at.
+- **Same-image discipline**: QA'd run and live re-run must use the same
+  image and unchanged sources, else what ships ≠ what was approved.
 
-- Consumers (sanbase, metrics_store subscribers, facing cluster) must
-  not need query changes — the read pattern and table names they use
-  should keep working, or any change must be coordinated/transparent.
-- Metric tables are shared across all assets/metrics; a fix is usually
-  scoped to one chain's metrics — full-table swaps are too blunt unless
-  combined with selective copy-back.
-- MV fan-out fires on INSERT into the live tables; writes landing
-  elsewhere bypass it (must be replayed at switch), writes landing live
-  are irreversible (guard leak of 07-07 was exactly this class).
-- Airflow side: one historical DAG per asset, no mechanism to run two
-  versions of it concurrently against different destinations.
+## Explored & set aside (decision trail)
 
-## Candidate directions (to brainstorm)
+1. **Side-table recompute + merge-back INSERT** — works, no consumer
+   changes; release is minutes not seconds; superseded by (2).
+2. **Side tables + `ATTACH PARTITION FROM` promotion** — the best full
+   solution found: attach copies parts via hardlink (source table keeps
+   its data), seconds-atomic for the unpartitioned daily table
+   (`PARTITION tuple()`), per-month for intraday; no consumer/schema
+   changes. Evolved into *ephemeral per-incident clone DBs*: full table
+   set (incl. intermediates) deployed per re-run, grants-isolated,
+   genesis-only re-runs (kills state seeding), promotion-as-PR
+   (snapshot → attach → scoped deletes → MV replay), then DAG + tables
+   dropped. Fully specified; set aside for complexity, **not** dead —
+   bolts onto the selected design later (experimental tables are the
+   clone set; promotion replaces the second live re-run) if defects
+   (b)/(c) start hurting.
+   Carried obligations of any attach design: attach doesn't fire MVs
+   (needs downstream replay), can't delete live-only keys (needs scoped
+   `ALTER DELETE`; worst on delta_futures — stale future contributions
+   keep firing), freeze discipline between QA and attach.
+3. **run_id version dimension in main tables** — requires run_id
+   appended to ORDER BY (doable in-place: `ADD COLUMN … MODIFY ORDER BY`)
+   plus read-side resolution. Resolution options all rejected: view
+   under the name (ruled out), row policies (complexity moved, not
+   removed), consumer filter `run_id IN released_runs` (feasible,
+   no-flag-day migration, but DMF-internal reads are a big surface and
+   the unfiltered long tail is risky). Key insight kept: with a static
+   released-runs set, argMax(computed_at) resolves the rest — no
+   per-scope pointer needed.
+4. **Distributed/proxy switch layer, per-metric partition surgery,
+   process-only sequencing** — rejected (heavyweight / wrong
+   partitioning / doesn't give inspection).
 
-Seeds only — not evaluated yet:
+## Greenfield view (strategic notes)
 
-1. **Side-table recompute + merge-back release**: point historical DAG
-   (via the existing table-name env vars) at a scratch table; on
-   approval, INSERT-SELECT into live with fresh `computed_at`
-   (release = one insert, minutes not days; rollback = re-insert old
-   snapshot; needs old-version snapshot + MV/tip handling).
-2. **Introduce a switchable layer over metric tables** (Distributed or
-   proxy/view per metric table, like sources): heavyweight — renames
-   under consumers, MV re-pointing, facing replication.
-3. **Partition-level surgery**: `PARTITION BY metric_id` means
-   `REPLACE PARTITION` from scratch table to live is atomic per metric —
-   possibly the cheapest atomic switch, if computed_at/tip semantics
-   work out.
-4. **Version dimension in the data** (e.g. version column + served-version
-   pointer, or exploit `metric_metadata_versioned` ids): clean model,
-   but touches consumers/read pattern.
-5. **Process-only improvement**: keep instant-live but sequence re-runs
-   newest-first / freeze-and-blitz to shrink the hybrid window — cheap,
-   doesn't solve (a).
+Root cause of all pain: **write = release** — storage, version
+resolution and serving conflated in ReplacingMergeTree+argMax. The
+greenfield shape (implementable on our stack): immutable per-run
+datasets, a catalog mapping (metric, asset) → served version, version
+resolution in the **sanbase registry** (the one indirection point that
+touches no end consumer), explicit history/tip split, Airflow Datasets
+for data-aware orchestration, derived stores rebuilt at release instead
+of insert-time MVs. Usage decisions that block it today, cheap→dear:
+single namespace/omnipotent writer; non-hermetic state; task-cron
+Airflow with no source-version lineage; insert-time MV fan-out;
+consumers bound to physical names; shared mega-tables; write=release.
+Strategic successor task if ever funded: **version resolution in the
+sanbase metric registry** — after that, true pointer-flip releases
+become possible and the MV-replay problem dissolves.
 
-## Open questions
+## Next steps
 
-- How much of the guard/table_qa tooling can be reused as the
-  "inspection" step verbatim?
-- Does `REPLACE PARTITION` interact safely with the realtime DAG writing
-  into the same partition during the switch?
-- Scope unit of a release: per chain? per (metric set × date range)?
-- Do we need rollback beyond "keep the old snapshot table for N days"?
-- What happens to `metrics_store` / dt-optimization / facing during and
-  after a swap — replay, recompute, or MV-on-scratch-table?
+- [ ] DAG factory: image override + all-or-nothing experimental switch
+- [ ] Create missing experimental tables (address_profit, available_signals,
+      historic_optimization inner, pit) with fresh ZK paths
+- [ ] Experimental-mode CH user + grants (`%_experimental` writes only)
+- [ ] Truncate + snapshot steps; QA diff runbook (guard reuse)
+- [ ] Retire hand-maintained `*-experimental` DAG copies
