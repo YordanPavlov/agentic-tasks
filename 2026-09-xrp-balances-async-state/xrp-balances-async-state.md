@@ -3,11 +3,11 @@
 Migrate the XRPBalances Flink job to the async state API (state V2 / ForSt), following the
 ETH stacks pattern (PR #306), and clean up the design issues surfaced along the way.
 
-**Status (2026-09-11):** Java model committed; correction-funnel fix `29c50449` (heap buffers,
-union state at barriers) **deployed to hprod and evaluated: ~40–80x throughput, checkpoints
-7 min → 21 s**. New bottleneck is the `Order_balances` constant-key stage (explains the
-remaining TM CPU skew); in-progress edits on branch `adoptJavaTypes`. Devops side (ForSt
-profile + xrp-balances-v6) committed on `xrpBalancesForst` through `5c05777a5`.
+**Status (2026-09-14):** Java model committed; correction-funnel fix `29c50449` deployed and
+evaluated (~40–80x, checkpoints 7 min → 21 s). The follow-up `Order_balances` heap-buffer fix
+is **committed as `76a73cb1` on `adoptJavaTypes`** (not deployed); it is checkpoint-incompatible
+with the running job, so Yordan schedules a clean re-deploy (fresh bootstrap). Devops side
+(ForSt profile + xrp-balances-v6) committed on `xrpBalancesForst` through `5c05777a5`.
 
 ## What the branch contains (oldest first)
 
@@ -261,3 +261,65 @@ consumed its ~5–6x headroom. It is the next lever (working tree has in-progres
 never started (ECR image-pull i/o timeouts on node `freya`; node-local registry connectivity
 issue, worth watching), Flink replaced it with `taskmanager-1-7` and the job recovered at full
 rate. First real exercise of the new union-state snapshot/restore path passed.
+
+## 2026-09-14 — Order_balances moved to heap buffers too (`76a73cb1`, awaiting deploy)
+
+Note first: the "in-progress edits to OrderBalancesProcess" mentioned on 09-11 no longer
+existed (working tree clean, stash empty; `684237be` only fixed a build warning in that file) —
+the fix below was implemented fresh.
+
+The ordering stage was the remaining ceiling (~885 ms/s busy constant-key subtask, upstream
+backpressured, its TM at ~2.4 cores vs 0.4–0.6): it still inherited `AsyncBlockDrainProcess`,
+i.e. the same per-record ForSt round trip removed from the correction stage by `29c50449`.
+Committed as `76a73cb1` on `adoptJavaTypes`:
+
+- **`HeapBlockDrainOperator`** (job/helpers) — the heap-buffer scaffolding extracted from the
+  correction operator: TreeMap buffer by block number, drain of complete blocks ascending in
+  `processWatermark` before forwarding it, fail-loud no-late check, spill of still-waiting
+  records to union-redistributed operator state at barriers, owner-key restore (non-owners shed
+  at next snapshot). Counterpart of `AsyncBlockDrainProcess` for the parallelism-1 constant-key
+  stages, whose whole buffer fits one subtask's heap.
+- **`CorrectBlockTimestampsOperator`** refactored onto the base — persisted state names/layout
+  byte-identical to what is deployed; pure structural change.
+- **`OrderBalancesOperator`** replaces `OrderBalancesProcess`: `drainBlock` sorts in place by
+  `Balance.PRIMARY_KEY_ORDER` and emits with the block number as record timestamp; persists
+  `lastForwardedWatermark` (owner-only) so the no-late check stays tight across restores. The
+  stage no longer uses async state at all. Heap residency here is a single drain burst — the
+  per-address stage releases a block's records only just ahead of the watermark that drains
+  them — so barrier-time spill is smaller than at the correction stage.
+- Wiring: `keyBy(constant).transform(...)`, **new uid `order-balances-heap`**,
+  `enableAsyncState()` dropped at the stage; operator name "Order balances" kept so the
+  `Order_balances` metrics stay continuous.
+- Tests: pipeline golden expectations untouched; new `OrderBalancesOperatorTest` on the operator
+  harness — drain order, snapshot-while-buffered → restore → drain, restored-watermark late
+  rejection, fail-loud late path. First harness-level restore coverage for this scaffolding.
+  147/147 green.
+
+### Why the running job cannot swap onto this image (analyzed, decided: clean re-deploy)
+
+1. Restore fails by design: the checkpoint's keyed ForSt state under uid `order-balances`
+   (block-buffer, drained-watermark, timers) is unclaimed by the new graph.
+2. `allowNonRestoredState` would force it but silently drops whatever sat in the ordering
+   buffer at the barrier — those blocks' balances never reach Kafka; during backfill the buffer
+   is never empty (alignment envelope), so loss is guaranteed.
+3. `stop --drain` (flush buffer, then savepoint) poisons the state that IS carried over:
+   the correction chain would persist `lastForwardedWatermark = Long.MaxValue` (every record
+   after restart trips the no-late check) and the per-address `drained-watermark` would persist
+   MAX (burst guard swallows all future timer firings — silent stall). Making drain survivable
+   needs migration-only clamping code; not worth it.
+
+Decision: fresh bootstrap with the new image, same playbook as the `29c50449` deploy; if the
+current run is near head, finish the output-equivalence check vs prod `xrp_balances` on the old
+image first, then the re-run revalidates it on the new one.
+
+### Next steps
+
+1. Image build off `76a73cb1`; bump tag in `hprod/.../xrp/xrp-balances-v6/values.helm.yaml`;
+   clean re-deploy (fresh bootstrap — `make buckets` first if buckets ever recreated).
+2. After catch-up: output equivalence vs prod `xrp_balances` (hash-multiset, as stacks), and
+   re-check the TM CPU profile — remaining cost at the ordering subtask is sort + Map + Kafka
+   JSON, the irreducible price of the sorted-output contract. If still short, next lever is
+   pre-grouping into per-block batches before the constant-key shuffle.
+3. Parked (unchanged): autoscaler block for the backfill lifecycle; `job.restart.failed`
+   operator option; Kafka tooling unreachable from agent container; `freya` node-local
+   registry connectivity.
