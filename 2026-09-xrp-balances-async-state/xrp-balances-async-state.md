@@ -316,10 +316,23 @@ image first, then the re-run revalidates it on the new one.
 
 1. Image build off `76a73cb1`; bump tag in `hprod/.../xrp/xrp-balances-v6/values.helm.yaml`;
    clean re-deploy (fresh bootstrap — `make buckets` first if buckets ever recreated).
-2. After catch-up: output equivalence vs prod `xrp_balances` (hash-multiset, as stacks), and
-   re-check the TM CPU profile — remaining cost at the ordering subtask is sort + Map + Kafka
+2. After catch-up: output equivalence vs prod `xrp_balances` — **process established and run
+   clean against the current (`29c50449`) run, see below**; repeat per
+   [qa/qa-output-comparison.md](qa/qa-output-comparison.md). Also re-check the TM CPU
+   profile — remaining cost at the ordering subtask is sort + Map + Kafka
    JSON, the irreducible price of the sorted-output contract. If still short, next lever is
    pre-grouping into per-block batches before the constant-key shuffle.
 3. Parked (unchanged): autoscaler block for the backfill lifecycle; `job.restart.failed`
    operator option; Kafka tooling unreachable from agent container; `freya` node-local
    registry connectivity.
+
+## 2026-09-14 — output QA: the 29c50449 run matches prod (148/148 months)
+
+The async run's output (`test.xrp_balances_test`, backfill watermark at block 95.8M /
+2025-05-01) was compared against prod `xrp_balances` over 2013-01 → 2025-04:
+**PASS on every month** — identical key sets, bit-identical non-float columns, float
+sums within 1e-9. Full method, reusable sweep/analyzer scripts, and the gotchas
+(ReplacingMergeTree dup handling, old table's ULP-level self-inconsistency, monster-IOU
+months weakening the float check, the uncleared-first-run duplicates in the test table)
+live in [qa/qa-output-comparison.md](qa/qa-output-comparison.md). The upcoming re-run
+on the Order_balances heap-buffer image should repeat that runbook once caught up.
