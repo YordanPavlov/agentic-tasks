@@ -336,3 +336,62 @@ sums within 1e-9. Full method, reusable sweep/analyzer scripts, and the gotchas
 months weakening the float check, the uncleared-first-run duplicates in the test table)
 live in [qa/qa-output-comparison.md](qa/qa-output-comparison.md). The upcoming re-run
 on the Order_balances heap-buffer image should repeat that runbook once caught up.
+
+## 2026-09-17 — autoscaler rescale wedge took the job down; operator bug identified
+
+The v6 job (deployed Sep-16 09:11 UTC off devops `xrpBalancesForst`) was found down —
+FlinkDeployment `CANCELED/UPGRADING`, no JM/TM pods since 04:13 UTC, `RESTOREFAILED`
+looping every minute. Not ArgoCD-related (initial hint ruled out: no hprod spoke, no
+Application CRD on hprod, trail fully internal to the Flink operator).
+
+**Incident chain (all from operator/JM logs):**
+1. Autoscaler + adaptive scheduler rescaled in-place every 1–2 min all night: desired
+   per-vertex parallelism (64–128, from jittery backlog estimates) was UNREACHABLE —
+   slot ceiling is 18 (`slotmanager.number-of-slots.max`), so effective parallelism
+   never moved while `pipeline.jobvertex-parallelism-overrides` flapped ±1 on the
+   Parse-balances vertex. `job.autoscaler.stabilization.interval` (2h) does NOT gate
+   in-place rescales — it anchors to job restarts, which in-place scaling never causes.
+2. 04:12:37 one rescale's REST apply (`updateVertexResources`) ran 18.3s (normal
+   ~0.2s; previous rescale still digesting, JM = 1 CPU hard cap) → operator's 10s
+   `kubernetes.operator.flink.client.timeout` expired → "Error while rescaling,
+   falling back to regular upgrade".
+3. Fallback upgrade with `last-state.job-cancel.enabled: true` → suspendMode=CANCEL →
+   job cancelled; JM on terminal CANCELED wiped its own ZK HA metadata (by design).
+4. Restore then refused forever: "HA metadata is not available to restore from last
+   state" — despite `status.jobStatus.upgradeSavepointPath` = chk-455.
+
+**Operator bug (deployed image b40c553 = exactly release 1.13.0; source verified):**
+the reconciler decided `JobUpgrade(suspendMode=CANCEL, restoreMode=SAVEPOINT)` and the
+async-cancel branch writes `upgradeMode=savepoint` into lastReconciledSpec precisely so
+the restore uses the recorded checkpoint without HA metadata. 20s later the restore ran
+with `upgradeMode=last-state` anyway → `requireHaMetadata=true` → logs prove the path:
+ZK `atLeastOneCheckpoint` probe, "Keeping HA metadata for last-state restore",
+"Deploying application cluster requiring last-state from HA metadata" → throw. The
+restoreMode=SAVEPOINT decision is lost between cancel and restore (write clobbered or
+never patched; exact mechanism not caught statically — every code path reads clean).
+NOTE the wedge is PROTECTIVE: the alternative branch (`atLeastOneCheckpoint`=false, no
+savepoint opt) was a STATELESS submit — silent empty-state restart. Upstream fixed
+adjacent issues post-1.13.0 (FLINK-38077 cancel-only-if-JM-READY, FLINK-39270 status-
+savepoint trust under slow JM) but neither covers this path → candidate upstream report,
+logs preserved here. Next occurrence: capture `kubectl get flinkdeployment -o yaml`
+(check `lastReconciledSpec.job.upgradeMode` vs `jobStatus.upgradeSavepointPath`) +
+operator log from "Error while rescaling" on; optionally set logger
+`o.a.f.k.o.reconciler` to DEBUG ("Job upgrade available: ...") to make the trace
+conclusive.
+
+**Fixes staged on devops `xrpBalancesForst` (chart `flink-job-template`, uncommitted,
+awaiting review):** autoscaler-guardrails block, emitted only when a job sets
+`job.autoscaler.enabled` — `job.autoscaler.vertex.max-parallelism` derived from the
+slot ceiling (job's `slotmanager.number-of-slots.max`, else replicas×slots; renders 18
+here) kills the unreachable-target churn; `kubernetes.operator.flink.client.timeout:
+"1 min"` makes a slow rescale not count as failed. Decisions: `job-cancel.enabled`
+STAYS `"true"` fleet-wide (fresh submission on deploys is wanted; now hasKey-guarded
+per-job + residual risk documented in the template comment) — lightweight option chosen
+over per-job `upgradeMode: savepoint`; UPGRADING/JM-MISSING Prometheus alert designed
+but SKIPPED for now (operator exposes :9999 metrics, nothing scrapes them yet).
+
+**Recovery:** `make redeploy_from RESTORE_PATH=s3://flink-checkpoints-production-xrp-
+balances-v6/checkpoints/ha/0717b19886e92ca06cddb866b6b024ca/chk-455` (chk-455 =
+04:10:49 UTC, ~6.9 GiB, no discard lines at shutdown; verify `_metadata` via mc first).
+Kafka exactly-once txn window: resume within 7 days of Sep-17 04:13 UTC. Plain
+`make install`/resume would just re-enter the RESTOREFAILED loop.
