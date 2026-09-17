@@ -26,6 +26,14 @@ single place for this work; the cheatsheet files were copied here.
 - Mi Drop (`com.xiaomi.midrop`) is disabled, not uninstalled: without it the
   "USB debugging (Security settings)" toggle stays grayed out unless signed
   in to a Mi Account.
+- Animation settings (2026-09-17 lag session): the three standard animation
+  scales are off in Developer options; the MIUI-specific recents/transition
+  animation (spring-based, ignores those scales) is sped up 5x via
+  `adb shell settings put global transition_animation_duration_ratio 0.2`.
+  Writing global settings needs "USB debugging (Security settings)", which
+  requires a Xiaomi Account sign-in (done, old account). An OS upgrade may
+  reset any of these (the 2026-08 upgrade reset plain USB debugging, stored
+  the same way) — re-check after upgrades.
 
 ## Session log
 
@@ -65,3 +73,19 @@ single place for this work; the cheatsheet files were copied here.
   Link to Windows (`com.microsoft.appmanager` + two service packages), and
   Mi Cloud (`com.miui.cloudbackup`/`cloudservice`/`micloudsync` — no Mi
   Account in use). All 11 added to the script (25 → 36 packages).
+
+### 2026-09-17 — lag investigation
+
+- Perceived lags examined over adb: phone healthy (no throttling, battery
+  saver off, RAM status normal). Gboard frame stats measured live: Latin↔
+  Cyrillic switch costs 150–300ms of layout/language-model rebuild —
+  inherent Gboard behavior, unrelated to the debloat.
+- Removed `com.xiaomi.aiservice` + `com.xiaomi.aicr` (~700MB RAM combined);
+  added to the script (36 → 38). `com.xiaomi.aiasst.vision` left in place.
+- Slow keyboard pop-up and window transitions fixed via animation settings —
+  see Notes. `miui_home_animation_rate` (system table) was tried and had no
+  effect; reverted to 1.
+- MIUI blocks `settings put` from adb: system table unlocked via
+  `adb shell appops set com.android.shell WRITE_SETTINGS allow`; global
+  table only via the "USB debugging (Security settings)" toggle, for which
+  the user signed into their existing Xiaomi Account.

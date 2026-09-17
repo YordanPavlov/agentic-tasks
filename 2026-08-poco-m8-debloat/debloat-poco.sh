@@ -51,6 +51,9 @@ UNINSTALL_PACKAGES=(
   com.miui.cloudbackup                    # Mi Cloud (unused, no Mi Account)
   com.miui.cloudservice
   com.miui.micloudsync
+  # Added 2026-09-17, lag investigation: Xiaomi AI services holding ~700MB RAM
+  com.xiaomi.aiservice
+  com.xiaomi.aicr
 )
 
 # Only disabled, not uninstalled: with Mi Drop removed the "USB debugging
