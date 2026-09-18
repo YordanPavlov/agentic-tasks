@@ -395,3 +395,55 @@ balances-v6/checkpoints/ha/0717b19886e92ca06cddb866b6b024ca/chk-455` (chk-455 =
 04:10:49 UTC, ~6.9 GiB, no discard lines at shutdown; verify `_metadata` via mc first).
 Kafka exactly-once txn window: resume within 7 days of Sep-17 04:13 UTC. Plain
 `make install`/resume would just re-enter the RESTOREFAILED loop.
+
+## 2026-09-18 — S3A restore livelock diagnosed + fixed; full autoscaler lifecycle validated; scale-down sweep incident (self-healed)
+
+**Second incident (Sep-17 15:53 → Sep-18 morning): restore livelock.** After the chk-455
+recovery the guardrails held (zero rescale churn for 4h — previously ~60/h). The first
+legitimate rescale (15:53, targets now slot-capped 16/18) applied cleanly in-place, but the
+task restart it triggers hit a pre-existing weakness: the ForSt restore/re-open storm
+exhausted the S3A pool (256) — `getFileStatus ... Timeout waiting for connection from pool`,
+restore fails → global restart → same storm, every ~10 min for hours; compounded by a 6th
+16g TM that couldn't schedule (nodes full). KEY SIZING INSIGHT (verified in ForSt source,
+`fs/cache/CachedDataInputStream.java`): a pool connection is held by every OPEN remote
+stream — ForSt pins its remote S3AInputStream per open file handle — NOT just by active I/O
+threads. Cold-restore demand = transfer threads (instances × transfer-thread-num=4 ≈ 60 at
+3 slots × 5 stateful ops) + open SST handles (state-layout dependent, low hundreds) × 2
+old/new attempt overlap. 256 was exactly marginal; long-lived TM JVMs accumulated stranded
+connections over 60+ interrupted attempts (always the 18h-old TM failing). Fleet chart fixes
+(committed 4a2b8b6c9): `fs.s3a.connection.maximum` 256→1024 (sizing model in chart comment),
+`terminationGracePeriodSeconds` 7200→300 (hung TMs sat 2h in Terminating; healthy Flink
+exits in seconds). Recovered via `make redeploy_from` from chk-552; user freed node memory →
+job ran at full 18 slots. Also: `make redeploy_from` now auto-discovers
+`status.jobStatus.upgradeSavepointPath` on STOPPED jobs (4f95f5a19; refuses on RUNNING —
+field is stale there — and on the `KUBERNETES_OPERATOR_LAST_STATE` dummy marker).
+
+**Autoscaler scale-down: 24h→3h** (f85af68e9) — the 24h hold was sized for the restore-storm
+era. NOTE: `job.autoscaler.*` keys are operator-side; the operator strips them from the
+submitted Flink config, so deploying the change did NOT restart the job, and the running
+delayed-scale-down clock (firstTriggerTime 10:35:56Z) survived.
+
+**Third incident (13:39–14:05 UTC, self-healed): exactly-once sink sweep after 18→1 drop.**
+Scale-down executed cleanly (TMs released 13:40) but the job sat CREATED / no checkpoints
+for 26 min: the surviving sink subtask's KafkaSink init runs the transaction-abort sweep
+(INCREMENTING naming: id = prefix-subtask-checkpointId; broker keeps each id's metadata
+7 DAYS, so the probe space = union of ALL runs of this job name: 18 old subtasks × counters
+to ~1500 × 3 topics), serialized onto ONE subtask at ~10 probes/s. At p=18 the sweep is
+parallelized and invisible; the one-step drop to p=1 (scale-down.max-factor 1.0) made it
+maximal. Nothing logs progress at INFO; CR shows CREATED; checkpoints abort with "Not all
+required tasks are currently running" — looks stuck, is actually grinding. Healed at
+14:05:00 the moment the sweep finished; checkpoints metronomic since (chk 722 → 817+,
+~3.6 GiB, 2s). Full lifecycle now validated: backfill@18 slots → catch-up → 3h-held
+scale-down → single-TM steady state.
+
+**Open mitigations for the sweep class:**
+1. `job.autoscaler.vertex.min-parallelism: 3`-ish in job values — keeps future sweeps
+   parallel, caps per-subtask id inheritance. Cheap, devops-side.
+2. Eliminate the class: flink-connector-kafka 4.x `TransactionNamingStrategy.POOLING`
+   (etherbi-flink code change, KafkaSink builder). Reuses a bounded id pool per subtask;
+   abort switches from PROBING (the sweep) to LISTING (asks the broker which transactions
+   are actually open). Requires Kafka 3.0+ (cp-kafka 7.8.2 ✓), extra read permissions on
+   target topics, and a clean migration (checkpoint on connector 4.x INCREMENTING first, or
+   any savepoint); switching BACK to INCREMENTING is unsupported. Flink 2.3 jobs are on
+   connector 4.x already, so likely a one-line builder change — verify connector version in
+   etherbi-flink first.
