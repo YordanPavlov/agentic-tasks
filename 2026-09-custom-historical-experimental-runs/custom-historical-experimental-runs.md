@@ -1,7 +1,8 @@
 # Custom-historical experimental runs
 
 **Started:** 2026-09-21
-**Status:** design agreed, build not started
+**Status:** build started — branch `custom-historical-experimental` (a46b13b0)
+pushed with the DAG knobs; PR not yet created; stage test pending
 **Repo:** `clickhouse-tables` (custom-historical DAG + DMF)
 **Related:** `2026-09-historic-metrics-release-process` (release/recompute
 side; shares the experimental-tables + grants build items)
@@ -28,16 +29,32 @@ output before release. Analysis of the output is out of scope.
    IDs are permanent across dev→production flips (populate re-inserts
    under the saved id). **No metadata-table overrides needed anywhere**;
    `metric_metadata_experimental` is obsolete for this flow.
-3. **Populate runs from master only — merge first to register.**
-   `populate_clickhouse_metadata.py` is a full-state reconciler: run
-   from a stale/partial branch it rolls back specs changed on master
-   since fork AND auto-deprecates assets missing from the local spec set
-   (`populate_clickhouse_metadata.py:138-156`; the `DAILY_SPECS_PATH`
-   subset variant is catastrophic). Rather than build scoped
-   registration, we keep the trunk-only contract: new metrics merge with
-   `status: development` (dark), new assets merge their yaml (no status
-   gate — realtime computation starts immediately). Enforce with a
-   guard in `populate-metadata.yml` refusing `real=true` off master.
+3. **REVERSED 2026-09-21: branch populate runs on stage are a feature,
+   not a hazard — no guard.** Deeper reading of the reconciler showed
+   the trunk-only rationale was overstated:
+   - **No removal path for metrics**: branch-new registrations are
+     permanent (wanted — that's pre-merge stage registration; the
+     framework resolves `(name,version)→metric_id` from
+     `metric_metadata_versioned` at runtime, so an unregistered metric
+     can't compute at all). Assets DO get a `deprecated:true` patch.
+   - **Rollbacks are content-only and transient**: computation reads
+     specs from the image's YAML, not the DB; the DB `specification`/
+     `status` rollback heals ≤30 min via the `ch-metadata` task in the
+     realtime `daily-metrics` DAG (stage+prod, from env image). Impact
+     is view/dict visibility blips (+ niche: jobs reading the
+     `metric_metadata` view at runtime, e.g. composite_labeled_holders).
+   - **The workflow is stage-only by construction**: `runs-on:
+     san-runner` = ARC scale set in the stage cluster (prod's is
+     `san-runner-prod`), default cluster-local CH hosts, no prod creds.
+     Prod's registry writer is `ch-metadata` from the `:production`
+     image → registration reaches prod only on release.
+   Contract: rebase before dispatching (stale checkout rolls back
+   others' content until the next tick) and ALWAYS label new metrics
+   `status: development` — the default is `production` = instantly
+   user-visible, and registrations can't be auto-undone. Candidate
+   follow-up: populate-side validation refusing new metrics without an
+   explicit status label. (The `DAILY_SPECS_PATH` subset variant
+   remains catastrophic — full reconcile from a partial spec set.)
 4. **Rejected**: dry-run CSV pipeline variant (output must land in
    tables the backend can use); patching `metric_metadata_experimental`
    (wrong table — runtime resolves IDs from `metric_metadata_versioned`).
@@ -87,14 +104,45 @@ output before release. Analysis of the output is out of scope.
 
 ## Build items
 
-- [ ] `custom_dag_image_tag` Variable → `tag` kwarg in custom DAG(s)
-- [ ] `custom_dag_experimental` switch: curated all-or-nothing env set;
-      document the chain-complete-or-seed contract
-- [ ] `populate-metadata.yml`: refuse `real=true` when ref != master
+- [x] `custom_dag_image_tag` Variable → `tag` kwarg (custom DAG 1 only)
+- [x] `custom_dag_experimental` switch: `EXPERIMENTAL_TABLE_ENV_VARS`
+      in `utils.py` (14 knobs, all-or-nothing; the 3 missing
+      experimental tables are redirected anyway → loud pod failure, no
+      prod-table leak); contract documented in `airflow/README.md`
+- [x] ~~`populate-metadata.yml` guard~~ — REVERSED, see decision 3
+- [x] Decide clone-vs-switch: knobs on `custom-historical-metrics`
+      only; `custom-historical-metrics-2` stays vanilla for
+      operational runs
+- [ ] Stage test via airflow-dev (below), then PR
 - [ ] Missing experimental tables (address_profit, available_signals,
-      historic_optimization inner, pit) — shared w/ release-process task
+      historic_optimization inner, pit) — shared w/ release-process
+      task; exist on neither stage nor prod (both otherwise have the
+      same 10 `*_experimental` tables)
 - [ ] Experimental-mode CH user, `%_experimental` writes only — shared
 - [ ] Verify sanbase: dev-metric invisibility via the view;
       `available_metrics` dev-id noise harmless
-- [ ] Decide: dedicated experimental DAG clone vs mode switch on
-      existing custom-historical
+- [ ] Candidate: populate validation — refuse NEW metrics lacking an
+      explicit `status` label (production-default footgun)
+
+## Testing on stage: airflow-dev cluster
+
+Personal Airflow at `devops/stage/k8s-apps/airflow-dev`:
+
+```bash
+NAMESPACE=yordan-p CH_BRANCH=custom-historical-experimental ENVIRONMENT=stage make install
+```
+
+(`make config` = `envsubst < values.yaml.template > values.yaml` under
+the hood.) `CH_BRANCH` picks the docker-airflow image with the branch's
+DAG code baked in (CI pushes it + syncs graph to
+`s3://airflow-meta-stage/graph/<branch>`); keep `ENVIRONMENT=stage` so
+job pods default to `clickhouse-tables:stage` — then
+`custom_dag_image_tag=custom-historical-experimental` proving the
+override is non-vacuous. Job pods hit stage CH (cluster-local hosts).
+Set the `custom_dag_*` Variables in the UI (Admin→Variables), incl. the
+two new knobs; trigger `custom-historical-metrics`; verify pod image +
+`DAILY_*_TABLE=*_experimental` env vars (`kubectl get pod -o yaml`) and
+rows in `daily_metrics_v2_experimental`. Negative test: unset both →
+`:stage` image + real tables. Known flake: Variables not loading on
+first start → delete the scheduler pod. Redeploy after new commits:
+`make restart` (DAGs are baked into the image, not synced).
