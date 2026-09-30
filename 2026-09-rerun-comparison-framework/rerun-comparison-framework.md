@@ -1,8 +1,9 @@
 # Re-run comparison framework (old vs new source tables / metrics)
 
 **Started:** 2026-09-29
-**Status:** XRP balances done with the tiered design (Tier 1 + 2, 2026-09-30). Next: Tier 1 speed-up,
-Tier 3 chain check, then generalize to stacks/transfers.
+**Status:** XRP balances done with the tiered design (Tier 1 + 2, 2026-09-30). **Superseded** by the generic
+runbook and scripts in [`2026-09-table-comparison`](../2026-09-table-comparison/table-comparison.md); continue there.
+This doc keeps the development history.
 **Repo target (later):** `clickhouse-tables` (`table_qa/`)
 
 ## Goal
