@@ -228,13 +228,16 @@ otherwise on the failing days.
 - IN subqueries on Distributed tables need `GLOBAL IN` (`distributed_product_mode = deny`).
 - `x IN (col, col)` is invalid; use `=` / `OR`.
 - `readonly` cannot use `cluster()` / `remote()`. `system.parts` covers the local shard only, so `tier0` multiplies
-  by the shard count, which makes it an estimate.
+  by the shard count, which makes it an estimate. Each connection can land on a different broker, and so a
+  different shard, so the estimates change between runs. `windows.json` is fixed once for that reason.
 - `system.query_log` / `system.processes` are per broker behind a load balancer, so measure time client-side.
 - Shard tables of `test.*` Distributed tables can live in `default` (`test.xrp_stacks_test` →
   `default.xrp_stacks_shard_v9`). `common.shard_table` follows the engine arguments.
 
 **Environment:**
 - The container lacks `column`, `bc`, `/usr/bin/time`.
+- Keep caches out of the session scratchpad if they are to outlive the session. Scratchpads of earlier sessions
+  stay under `/tmp/claude-1001/…/<session>/scratchpad/` but are not guaranteed to persist.
 - `pkill -f <pattern>` can match its own shell; kill by PID.
 
 **Deliverables:** keep outputs local. Don't publish artifacts or docs unless asked.
@@ -261,8 +264,11 @@ Not checked: tiers skipped, days not covered by T2, invariants not run.
 **xrp_stacks probe, 2026-09-30:**
 - **Scope:**
   - 2 Tier 1 windows (2013-01-01..2014-05-28 and 2024-01-02..06, 515 days).
-  - Tier 2, `--key old` and both aggregate checks on 3 days.
+  - Tier 2, `--key old` and the `net_change` / `age_dist` aggregate checks on 3 days.
+  - `age_exact` on 2013-01-02, 2013-02-13 and 2024-01-03.
   - cutoff 2026-09-03.
+  - Cache, in an ephemeral session scratchpad:
+    `/tmp/claude-1001/-home-agent-santiment-src-clickhouse-tables/ff56a5e9-fcea-4ac5-9ca1-a6f6d25bf81a/scratchpad/tcmp-stacks`
 - **Coverage and duplicates:**
   - New ends at 2026-09-05 20:17. **Open question for the user:** is that the intended end of the backfill?
   - Old holds many whole months twice: new/old ratio 0.50, and 2024-01 old rows = 2 × keys.
@@ -272,13 +278,18 @@ Not checked: tiers skipped, days not covered by T2, invariants not run.
   - 3,992 `value_diff`: different `odt` or `amount`, i.e. stacks split or consumed differently.
   - `--key old` gives identical numbers, so the key change has no effect.
 - **Aggregate checks:** `net_change` and `age_dist` have 0 violations in ~5.6M groups (max rel 7.9e-16).
-  - Verdict so far: a representation change with equal amounts per block and per age-day.
+  - `age_exact` (group by exact `odt`, 2024-01-03): 0 violations in 5.81M groups (max rel 2.2e-16). So the
+    `odt`/`amount` value diffs come only from `nonce` being assigned to stacks differently. Per address and block,
+    the multiset of (odt, amount) is the same.
+  - Verdict so far: a representation change (nonce numbering) with identical holdings and ages.
 - **Estimate:** full Tier 1 at 7–15 h at the observed speed, ~1 h at the balances speed.
 - **Next:**
   - rerun the probe off-peak to measure speed
   - full Tier 1 if the user accepts the run time
-  - `--sample` Tier 2 plus aggregate checks, including one with exact `odt`
+  - `--sample` Tier 2 plus `net_change` / `age_exact` (`age_exact` alone is enough, since it implies the others)
   - Tier 3 block sum
+  - The same `age_exact` run took 92 s at 17:00 vs ~250 s for `age_dist` at 14:00, which fits the load
+    explanation.
 - **Side finding:** 2013 rows with `sign = 1` have `odt = 1970-01-01` on both sides.
 
 ## Open

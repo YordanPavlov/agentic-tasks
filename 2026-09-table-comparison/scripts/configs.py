@@ -17,5 +17,8 @@ CONFIGS = {
                        start='2013-01-01', cutoff='2026-09-03',
                        agg_checks={'net_change': dict(group=['contractAddress', 'address', 'blockNumber'], value='sign * amount'),
                                    'age_dist': dict(group=['contractAddress', 'address', 'blockNumber', 'toDate(odt)'],
-                                                    value='sign * amount')}),
+                                                    value='sign * amount'),
+                                   # exact odt: also catches a changed consumption order within a day
+                                   'age_exact': dict(group=['contractAddress', 'address', 'blockNumber', 'odt'],
+                                                     value='sign * amount')}),
 }
