@@ -1,0 +1,55 @@
+Class Name                                                                                                                                                               | Shallow Heap | Retained Heap
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+org.apache.hadoop.fs.s3a.S3AInputStream @ 0x69e60a140                                                                                                                    |          112 |         9,128
+|- in org.apache.hadoop.fs.FSDataInputStream @ 0x69e60a118                                                                                                               |           40 |         9,216
+|  |- fsDataInputStream org.apache.flink.fs.s3hadoop.common.HadoopDataInputStream @ 0x69e60a108                                                                          |           16 |         9,232
+|  |  |- originalStream org.apache.flink.state.forst.fs.cache.CachedDataInputStream @ 0x69e60a0d8                                                                        |           48 |         9,328
+|  |  |  |- item java.util.concurrent.LinkedBlockingQueue$Node @ 0x69e60a0c0                                                                                             |           24 |         9,352
+|  |  |  |  |- next java.util.concurrent.LinkedBlockingQueue$Node @ 0x69e60a0a8                                                                                          |           24 |         9,376
+|  |  |  |  |  |- head java.util.concurrent.LinkedBlockingQueue @ 0x69e60a068                                                                                            |           48 |        23,984
+|  |  |  |  |  |  |- openedStreams org.apache.flink.state.forst.fs.cache.FileCacheEntry @ 0x69e609ed0                                                                    |           72 |        24,432
+|  |  |  |  |  |  |  |- value org.apache.flink.state.forst.fs.cache.DoubleListLru$Node @ 0x69e609db8                                                                     |           40 |        24,472
+|  |  |  |  |  |  |  |  |- prev org.apache.flink.state.forst.fs.cache.DoubleListLru$Node @ 0x69e61fbc0                                                                   |           40 |        24,456
+|  |  |  |  |  |  |  |  |  |- prev org.apache.flink.state.forst.fs.cache.DoubleListLru$Node @ 0x69e6359b8                                                                |           40 |        24,456
+|  |  |  |  |  |  |  |  |  |  |- prev org.apache.flink.state.forst.fs.cache.DoubleListLru$Node @ 0x69e63ba20                                                             |           40 |        24,456
+|  |  |  |  |  |  |  |  |  |  |  |- tail org.apache.flink.state.forst.fs.cache.FileBasedCache @ 0x6baff6e18                                                              |           88 |       520,384
+|  |  |  |  |  |  |  |  |  |  |  |  |- fileBasedCache org.apache.flink.state.forst.fs.ForStFlinkFileSystem @ 0x6baff6dc8                                                 |           32 |       523,136
+|  |  |  |  |  |  |  |  |  |  |  |  |  |- forStFileSystem org.apache.flink.state.forst.ForStResourceContainer @ 0x6baff6360                                              |           72 |         2,416
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |- optionsContainer org.apache.flink.state.forst.ForStKeyedStateBackend @ 0x6baff60d8                                          |          120 |        20,840
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |- switchContextListener org.apache.flink.runtime.asyncprocessing.StateExecutionController @ 0x69dbc5e10                    |          104 |       282,096
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |- arg$1 org.apache.flink.runtime.asyncprocessing.AsyncExecutionController$$Lambda+0x00007bd8bdea3290 @ 0x6baff5fa0      |           24 |            24
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |- timeoutHandler org.apache.flink.runtime.asyncprocessing.AsyncRequestBuffer @ 0x6bad3fd88                           |           64 |     1,083,960
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |- arg$1 org.apache.flink.runtime.asyncprocessing.AsyncRequestBuffer$$Lambda+0x00007bd8bdea3700 @ 0x6baff6018      |           16 |            16
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |- task java.util.concurrent.Executors$RunnableAdapter @ 0x6baff6000                                            |           24 |            40
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |- callable java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask @ 0x6baff5fb8               |           72 |           112
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |- [6] java.util.concurrent.RunnableScheduledFuture[16] @ 0x69d153d08                                     |           80 |            80
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |- queue java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue @ 0x69c2b3420               |           32 |           112
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |- <Java Local> java.lang.Thread @ 0x69c2b3390  asyncRequestBuffer-timeout-scheduler-thread-1 Thread|          104 |           248
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |- workQueue java.util.concurrent.ScheduledThreadPoolExecutor @ 0x69c2b3450                         |           80 |           480
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  '- Total: 2 entries                                                                                 |              |              
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  '- Total: 1 entry                                                                                      |              |              
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  '- Total: 1 entry                                                                                         |              |              
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  '- Total: 1 entry                                                                                            |              |              
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  '- Total: 1 entry                                                                                               |              |              
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  '- Total: 1 entry                                                                                                  |              |              
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  '- Total: 1 entry                                                                                                     |              |              
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |- asyncExecutionController org.apache.flink.runtime.asyncprocessing.operators.AsyncKeyedProcessOperator @ 0x69e315f50   |          128 |         3,320
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  '- Total: 2 entries                                                                                                      |              |              
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  |  '- Total: 1 entry                                                                                                           |              |              
+|  |  |  |  |  |  |  |  |  |  |  |  |  |  '- Total: 1 entry                                                                                                              |              |              
+|  |  |  |  |  |  |  |  |  |  |  |  |  '- Total: 1 entry                                                                                                                 |              |              
+|  |  |  |  |  |  |  |  |  |  |  |  '- Total: 1 entry                                                                                                                    |              |              
+|  |  |  |  |  |  |  |  |  |  |  '- Total: 1 entry                                                                                                                       |              |              
+|  |  |  |  |  |  |  |  |  |  '- Total: 1 entry                                                                                                                          |              |              
+|  |  |  |  |  |  |  |  |  '- Total: 1 entry                                                                                                                             |              |              
+|  |  |  |  |  |  |  |  '- Total: 1 entry                                                                                                                                |              |              
+|  |  |  |  |  |  |  '- Total: 1 entry                                                                                                                                   |              |              
+|  |  |  |  |  |  '- Total: 1 entry                                                                                                                                      |              |              
+|  |  |  |  |  '- Total: 1 entry                                                                                                                                         |              |              
+|  |  |  |  '- Total: 1 entry                                                                                                                                            |              |              
+|  |  |  '- Total: 1 entry                                                                                                                                               |              |              
+|  |  '- Total: 1 entry                                                                                                                                                  |              |              
+|  '- Total: 1 entry                                                                                                                                                     |              |              
+'- Total: 1 entry                                                                                                                                                        |              |              
+Total: 1 entry                                                                                                                                                           |              |              
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------

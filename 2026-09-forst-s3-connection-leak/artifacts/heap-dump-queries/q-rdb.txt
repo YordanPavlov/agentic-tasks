@@ -1,0 +1,14 @@
+toHex(r.@objectAddress)|owning                                                    |                   h
+--------------------------------------------------------------------------------------------------------
+0x69bec28f8            |java.util.concurrent.atomic.AtomicBoolean [id=0x69bec2920]| 136,168,791,168,000
+0x69c2c3b20            |java.util.concurrent.atomic.AtomicBoolean [id=0x69c2c3b48]| 136,168,785,840,128
+0x69eb653f0            |java.util.concurrent.atomic.AtomicBoolean [id=0x69eb65418]| 136,168,755,522,560
+0x69f3244f8            |java.util.concurrent.atomic.AtomicBoolean [id=0x69f324520]| 136,170,542,746,624
+0x6a01c56d0            |java.util.concurrent.atomic.AtomicBoolean [id=0x6a01c56f8]| 136,168,751,279,104
+0x6b36329d0            |java.util.concurrent.atomic.AtomicBoolean [id=0x6b36329f8]| 136,168,806,104,064
+0x6ba2c5e58            |java.util.concurrent.atomic.AtomicBoolean [id=0x6ba2c5e80]| 136,168,755,502,080
+0x6bad3f600            |java.util.concurrent.atomic.AtomicBoolean [id=0x6bad3f628]| 136,168,761,981,952
+0x6bc6ad170            |java.util.concurrent.atomic.AtomicBoolean [id=0x6bc6ad198]| 136,168,785,847,296
+0x6bc6bab20            |java.util.concurrent.atomic.AtomicBoolean [id=0x6bc6bab48]| 136,168,755,637,248
+Total: 10 entries      |                                                          |                    
+--------------------------------------------------------------------------------------------------------
