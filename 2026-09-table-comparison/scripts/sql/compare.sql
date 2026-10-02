@@ -10,55 +10,56 @@ SELECT
     day,
     category,
     count() AS keys,
-    sum(o_rows) AS old_rows,
-    sum(n_rows) AS new_rows,
+    sum(old_row_count) AS old_rows,
+    sum(new_row_count) AS new_rows,
     -- key hashes for rows.py and for the cross-shard check in summary.py; not kept for matching keys
-    groupArrayIf($max_keys)(hex(kh), category NOT IN ('equal', 'float_noise')) AS sample
+    groupArrayIf($max_key_hashes)(hex(key_hash), category NOT IN ('equal', 'float_noise')) AS key_hashes
 FROM
 (
     -- 3. Category per key, checked in this order.
-    --    *_ah: hash of all compared values (floats exactly), so min != max means several versions on that side.
-    --    *_vh: hash of the non-float values only. Floats are compared separately with the tolerance.
+    --    *_row_hash: all compared values (floats exactly), so min != max means several versions on that side.
+    --    *_values_hash: the non-float values only. Floats are compared separately, with the tolerance.
     SELECT
-        kh, day, o_rows, n_rows,
+        key_hash, day, old_row_count, new_row_count,
         multiIf(
-            n_rows = 0,                    'only_old',
-            o_rows = 0,                    'only_new',
-            n_ah_min != n_ah_max,          'new_multi',
-            o_ah_min != o_ah_max AND (n_ah_min = o_ah_min OR n_ah_min = o_ah_max),
-                                           'old_multi_new_matches',
-            o_ah_min != o_ah_max,          'old_multi',
-            o_ah_min = n_ah_min,           'equal',
-            o_vh != n_vh,                  'value_diff',
-            $floats_within_tol,
-                                           'float_noise',
-                                           'float_diff') AS category
+            new_row_count = 0,                          'only_old',
+            old_row_count = 0,                          'only_new',
+            new_row_hash_min != new_row_hash_max,       'new_multi',
+            old_row_hash_min != old_row_hash_max
+                AND (new_row_hash_min = old_row_hash_min OR new_row_hash_min = old_row_hash_max),
+                                                        'old_multi_new_matches',
+            old_row_hash_min != old_row_hash_max,       'old_multi',
+            old_row_hash_min = new_row_hash_min,        'equal',
+            old_values_hash != new_values_hash,         'value_diff',
+            $floats_within_tolerance,
+                                                        'float_noise',
+                                                        'float_diff') AS category
     FROM
     (
-        -- 2. One row per key. Duplicate rows of a key (unmerged ReplacingMergeTree parts) only raise *_rows.
+        -- 2. One row per key. Duplicate rows of a key (unmerged ReplacingMergeTree parts) only raise the row counts.
         SELECT
-            cmp_kh AS kh,
+            cmp_key_hash AS key_hash,
             min(cmp_day) AS day,
-            countIf(cmp_side = 0) AS o_rows,
-            countIf(cmp_side = 1) AS n_rows,
-            minIf(cmp_ah, cmp_side = 0) AS o_ah_min,
-            maxIf(cmp_ah, cmp_side = 0) AS o_ah_max,
-            minIf(cmp_ah, cmp_side = 1) AS n_ah_min,
-            maxIf(cmp_ah, cmp_side = 1) AS n_ah_max,
-            minIf(cmp_vh, cmp_side = 0) AS o_vh,
-            minIf(cmp_vh, cmp_side = 1) AS n_vh$float_aggs
+            countIf(cmp_is_new = 0) AS old_row_count,
+            countIf(cmp_is_new = 1) AS new_row_count,
+            minIf(cmp_row_hash, cmp_is_new = 0) AS old_row_hash_min,
+            maxIf(cmp_row_hash, cmp_is_new = 0) AS old_row_hash_max,
+            minIf(cmp_row_hash, cmp_is_new = 1) AS new_row_hash_min,
+            maxIf(cmp_row_hash, cmp_is_new = 1) AS new_row_hash_max,
+            minIf(cmp_values_hash, cmp_is_new = 0) AS old_values_hash,
+            minIf(cmp_values_hash, cmp_is_new = 1) AS new_values_hash$float_columns
         FROM
         (
             -- 1. Both tables reduced to the same shape. cmp_ prefixes keep aliases from shadowing table columns.
-            SELECT 0 AS cmp_side, $row_exprs
+            SELECT 0 AS cmp_is_new, $row_columns
             FROM $old
             WHERE $window AND ($where) AND ($where_old)
             UNION ALL
-            SELECT 1 AS cmp_side, $row_exprs
+            SELECT 1 AS cmp_is_new, $row_columns
             FROM $new
             WHERE $window AND ($where) AND ($where_new)
         )
-        GROUP BY cmp_kh
+        GROUP BY cmp_key_hash
     )
 )
 GROUP BY day, category

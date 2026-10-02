@@ -45,15 +45,15 @@ is part of the test: a renumbering shows up as `only_old` + `only_new` pairs.
 
 ## Usage
 
-Run from this directory. `<cfg>` is a key of `CONFIGS` in `configs.py`.
+Run from this directory. `<config>` is a key of `CONFIGS` in `configs.py`.
 
 1. Add a config to `configs.py`: the local tables, cluster, keys, values, start and cutoff.
-2. `python3 compare.py <cfg> 2024-01`: try one heavy month first and time it.
-3. `nohup python3 compare.py <cfg> > compare.log 2>&1 &`: run all months, 2 in parallel.
-4. `python3 summary.py <cfg>`: totals, failing days, samples and the verdict.
-5. `python3 rows.py <cfg> <day> <hash> ...`: the actual rows behind sample hashes.
+2. `python3 compare.py <config> 2024-01`: try one heavy month first and time it.
+3. `nohup python3 compare.py <config> > compare.log 2>&1 &`: run all months, 2 in parallel.
+4. `python3 summary.py <config>`: totals, failing days, samples and the verdict.
+5. `python3 rows.py <config> <day> <hash> ...`: the actual rows behind sample hashes.
 
-Results are cached per month under `$TCMP_CACHE/<cfg>/` (default `~/.cache/table-cmp`), so a run resumes where it
+Results are cached per month under `$TCMP_CACHE/<config>/` (default `~/.cache/table-cmp`), so a run resumes where it
 stopped. A change to the config or the SQL templates makes cached months stale, and they are re-run. After the
 table data changes (a backfill progressed, merges), use `--force`.
 

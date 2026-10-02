@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter, defaultdict
 
-from common import MAX_KEYS, OK_CATEGORIES, ResultRow, load_cfg, load_result, windows
+from common import MAX_KEY_HASHES, OK_CATEGORIES, ResultRow, load_config, load_result, windows
 
 # Order in which categories are printed, roughly from most to least serious.
 CATEGORY_ORDER = ('only_old', 'only_new', 'value_diff', 'float_diff', 'new_multi', 'old_multi',
@@ -29,83 +29,86 @@ MEANING = {
 
 def moved_keys(rows: list[ResultRow]) -> tuple[int, bool]:
     """Keys that are only_old in one (shard, month) and only_new in another, i.e. the same key placed
-    differently, not lost. Returns (count, complete); complete is False when some only_* lists were truncated."""
-    places: dict[str, dict[str, set[tuple[str, str]]]] = {'only_old': defaultdict(set), 'only_new': defaultdict(set)}
+    differently, not lost. Returns (count, complete); complete is False when some hash lists were capped."""
+    hashes = {'only_old': set[str](), 'only_new': set[str]()}
     complete = True
-    for r in rows:
-        if r['category'] in places:
-            complete &= len(r['sample']) == r['keys']
-            for h in r['sample']:
-                places[r['category']][h].add((r['host'], r['day'][:7]))
-    return len(places['only_old'].keys() & places['only_new'].keys()), complete
+    for row in rows:
+        if row['category'] in hashes:
+            complete &= len(row['key_hashes']) == row['keys']
+            hashes[row['category']].update(row['key_hashes'])
+    return len(hashes['only_old'] & hashes['only_new']), complete
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('config')
-    ap.add_argument('--days', type=int, default=30)
-    a = ap.parse_args()
-    cfg = load_cfg(a.config)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('config')
+    parser.add_argument('--days', type=int, default=30)
+    args = parser.parse_args()
+    config = load_config(args.config)
 
     rows: list[ResultRow] = []
-    missing: list[str] = []
-    elapsed = 0.0
-    for w in windows(cfg):
-        res = load_result(a.config, cfg, w)
-        if res is None:
-            missing.append(w.name)
+    missing_months: list[str] = []
+    query_time_s = 0.0
+    for window in windows(config):
+        result = load_result(args.config, config, window)
+        if result is None:
+            missing_months.append(window.name)
         else:
-            rows += res['rows']
-            elapsed += res['elapsed_s']
+            rows += result['rows']
+            query_time_s += result['elapsed_s']
 
-    print(f'# {cfg.old} vs {cfg.new}, {cfg.start} .. {cfg.cutoff} (exclusive)')
-    print(f'months: {len(windows(cfg)) - len(missing)} done, {len(missing)} missing or stale'
-          + (f": {', '.join(missing[:12])}{' …' if len(missing) > 12 else ''}" if missing else '')
-          + f'; query time {elapsed / 60:.0f} min')
+    month_count = len(windows(config))
+    missing_list = f": {', '.join(missing_months[:12])}{' …' if len(missing_months) > 12 else ''}"
+    print(f'# {config.old} vs {config.new}, {config.start} .. {config.cutoff} (exclusive)')
+    print(f'months: {month_count - len(missing_months)} done, {len(missing_months)} missing or stale'
+          + (missing_list if missing_months else '') + f'; query time {query_time_s / 60:.0f} min')
 
-    keys, old_rows, new_rows = Counter[str](), 0, 0
-    for r in rows:
-        keys[r['category']] += r['keys']
-        old_rows += r['old_rows']
-        new_rows += r['new_rows']
-    old_keys = sum(n for c, n in keys.items() if c != 'only_new')
-    new_keys = sum(n for c, n in keys.items() if c != 'only_old')
+    keys_per_category = Counter[str]()
+    keys_per_host = Counter[str]()
+    old_rows = new_rows = 0
+    for row in rows:
+        keys_per_category[row['category']] += row['keys']
+        keys_per_host[row['host']] += row['keys']
+        old_rows += row['old_rows']
+        new_rows += row['new_rows']
+    old_keys = sum(keys for category, keys in keys_per_category.items() if category != 'only_new')
+    new_keys = sum(keys for category, keys in keys_per_category.items() if category != 'only_old')
     print(f'\nold: {old_rows:,} rows, {old_keys:,} keys, {old_rows - old_keys:,} duplicate rows')
     print(f'new: {new_rows:,} rows, {new_keys:,} keys, {new_rows - new_keys:,} duplicate rows')
-    per_host = Counter[str]()
-    for r in rows:
-        per_host[r['host']] += r['keys']
-    print('keys per host: ' + ', '.join(f'{h} {n:,}' for h, n in sorted(per_host.items())))
+    print('keys per host: ' + ', '.join(f'{host} {keys:,}' for host, keys in sorted(keys_per_host.items())))
 
+    def print_order(category: str) -> int:
+        return CATEGORY_ORDER.index(category) if category in CATEGORY_ORDER else len(CATEGORY_ORDER)
     print('\n| category | keys | meaning |\n|---|---:|---|')
-    for c in sorted(keys, key=lambda c: CATEGORY_ORDER.index(c) if c in CATEGORY_ORDER else 99):
-        print(f'| {c} | {keys[c]:,} | {MEANING.get(c, "")} |')
+    for category in sorted(keys_per_category, key=print_order):
+        print(f'| {category} | {keys_per_category[category]:,} | {MEANING.get(category, "")} |')
 
-    moved, complete = moved_keys(rows)
-    if keys['only_old'] or keys['only_new']:
-        print(f'\nkeys only_old in one shard/month and only_new in another: {moved:,}'
-              + ('' if complete else f' (lower bound: hash lists are capped at {MAX_KEYS:,} per shard, day and category)'))
+    if keys_per_category['only_old'] or keys_per_category['only_new']:
+        moved, complete = moved_keys(rows)
+        caveat = f' (lower bound: hash lists are capped at {MAX_KEY_HASHES:,} per shard, day and category)'
+        print(f'\nkeys only_old in one shard/month and only_new in another: {moved:,}' + ('' if complete else caveat))
 
-    bad = [r for r in rows if r['category'] not in OK_CATEGORIES]
-    per_day: dict[str, Counter[str]] = defaultdict(Counter)
-    for r in bad:
-        per_day[r['day']][r['category']] += r['keys']
-    if per_day:
-        print(f'\nfailing days: {len(per_day):,}; the {min(a.days, len(per_day))} largest:')
-        for day, cats in sorted(per_day.items(), key=lambda kv: -sum(kv[1].values()))[:a.days]:
-            print(f'  {day}  ' + ', '.join(f'{c}={n:,}' for c, n in cats.most_common()))
+    differing_rows = [row for row in rows if row['category'] not in OK_CATEGORIES]
+    differences_per_day: dict[str, Counter[str]] = defaultdict(Counter)
+    for row in differing_rows:
+        differences_per_day[row['day']][row['category']] += row['keys']
+    if differences_per_day:
+        largest_days = sorted(differences_per_day.items(), key=lambda item: -sum(item[1].values()))[:args.days]
+        print(f'\nfailing days: {len(differences_per_day):,}; the {len(largest_days)} largest:')
+        for day, categories in largest_days:
+            print(f'  {day}  ' + ', '.join(f'{category}={keys:,}' for category, keys in categories.most_common()))
         print('\nsamples (python3 rows.py <config> <day> <hash> ...):')
         shown: set[str] = set()
-        for r in sorted(bad, key=lambda r: -r['keys']):
-            if r['category'] not in shown and r['sample']:
-                shown.add(r['category'])
-                print(f"  {r['category']:<22} {r['day']}  {' '.join(r['sample'][:3])}")
+        for row in sorted(differing_rows, key=lambda row: -row['keys']):
+            if row['category'] not in shown and row['key_hashes']:
+                shown.add(row['category'])
+                print(f"  {row['category']:<22} {row['day']}  {' '.join(row['key_hashes'][:3])}")
 
-    if missing:
+    if missing_months:
         verdict = 'INCOMPLETE: months missing'
-    elif not per_day:
+    elif not differences_per_day:
         verdict = 'PASS: every key equal (floats within tolerance)'
-    elif set(keys) - set(OK_CATEGORIES) == {'old_multi_new_matches'}:
+    elif set(keys_per_category) - set(OK_CATEGORIES) == {'old_multi_new_matches'}:
         verdict = "PASS with caveat: differences are only old's duplicates"
     else:
         verdict = 'DIFFERS: explain the categories above'

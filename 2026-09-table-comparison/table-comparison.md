@@ -30,7 +30,7 @@ Ground rules:
 3. Each key gets a category (below).
 4. Keys are counted per day and category. Up to 10,000 key hashes per category are kept for drill-down.
 
-The query is in `scripts/sql/compare.sql` and is written to be read. `compare.py <cfg> <month> --print-sql`
+The query is in `scripts/sql/compare.sql` and is written to be read. `compare.py <config> <month> --print-sql`
 prints the exact query for a config.
 
 **Where the query runs:**
@@ -69,14 +69,14 @@ Plain Python 3.11 plus `clickhouse-client`. The code is typed (`mypy --strict *.
 | script | what | cost |
 |---|---|---|
 | `configs.py` | one `Config` per comparison | |
-| `compare.py <cfg> [YYYY-MM ...] [--parallel N] [--force] [--print-sql]` | compares month by month, 2 months in parallel by default | ~3M rows/s (both sides together) |
-| `summary.py <cfg> [--days N]` | totals, failing days, moved keys, sample hashes, verdict | local |
-| `rows.py <cfg> <day> <hash> ...` | the actual rows of both tables for sample hashes, with the host each row is on | scans the month of `<day>` |
+| `compare.py <config> [YYYY-MM ...] [--parallel N] [--force] [--print-sql]` | compares month by month, 2 months in parallel by default | ~3M rows/s (both sides together) |
+| `summary.py <config> [--days N]` | totals, failing days, moved keys, sample hashes, verdict | local |
+| `rows.py <config> <day> <hash> ...` | the actual rows of both tables for sample hashes, with the host each row is on | scans the month of `<day>` |
 
 **Connection:** `TCMP_HOST` (default `clickhouse.production.san`), `TCMP_PORT` (`30900`), `TCMP_USER`
 (`readonly`). The `readonly` user is enough.
 
-**Cache:** results are cached per month under `$TCMP_CACHE/<cfg>/YYYY-MM.json` (default `~/.cache/table-cmp`).
+**Cache:** results are cached per month under `$TCMP_CACHE/<config>/YYYY-MM.json` (default `~/.cache/table-cmp`).
 - An interrupted run resumes where it stopped. A failed month stays uncached and is retried on the next run.
 - A change to the config or to the SQL templates marks cached months as stale, and they are re-run.
 - After the data itself changed (a backfill progressed, merges ran), re-run with `--force`.
@@ -118,14 +118,14 @@ Plain Python 3.11 plus `clickhouse-client`. The code is typed (`mypy --strict *.
 2. **Write the config.**
    - Set the cutoff a few days before the earlier of the two `max(dt)`.
    - Compare the sorting keys of both local tables (`system.tables.sorting_key`). If they differ, see "Key changes".
-3. **Time one heavy month:** `python3 compare.py <cfg> 2024-01`. Then estimate the full run from the number of
+3. **Time one heavy month:** `python3 compare.py <config> 2024-01`. Then estimate the full run from the number of
    months.
    - If the estimate is over budget, ask whether a longer run (overnight, resumable) is acceptable.
    - Otherwise run the most recent 2–3 years plus one heavy month per earlier year, and report the rest as not
      checked.
-4. **Run everything** in the background: `nohup python3 compare.py <cfg> > compare.log 2>&1 &`. It prints one line
+4. **Run everything** in the background: `nohup python3 compare.py <config> > compare.log 2>&1 &`. It prints one line
    per month.
-5. **`python3 summary.py <cfg>`.** For every category that is not OK, pick a sample hash and run `rows.py` on it.
+5. **`python3 summary.py <config>`.** For every category that is not OK, pick a sample hash and run `rows.py` on it.
    Find the cause from the rows.
 6. **Optionally, run table invariants** (below) on both sides.
 7. **Write the executive summary**, and add the run to "Runs" below.
@@ -175,7 +175,7 @@ They catch errors that old and new share, which a comparison cannot see:
 - `system.parts`, `system.processes` and `system.query_log` cover one broker. Use `cluster(...)` for the whole
   cluster, and measure time on the client.
 - `clickhouse-client --format` overrides a `FORMAT` clause in the query.
-- The server quotes 64-bit integers in JSON. `common.ch` turns that off.
+- The server quotes 64-bit integers in JSON. `common.run_query` turns that off.
 
 **Environment:**
 - `pkill -f <pattern>` can match its own shell; kill by PID.
