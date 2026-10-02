@@ -1,21 +1,26 @@
-"""Tier 2 drill-down: print the actual rows of both sides for sample key hashes (the `samples` of Tier 2).
+"""Print the actual rows of both tables for a few key hashes, on every shard, to see what differs.
+The hashes and days come from summary.py ("samples"). The whole month of <day> is scanned.
 
-usage: rows.py <config> <group> <kh> [kh ...] [--key old|new]
+usage: rows.py <config> <day> <hash> [hash ...] [--print-sql]
 """
-import sys
-from common import load_cfg, meta, rekey, ch, key_expr, side_where
-from tier2 import group_where
+from __future__ import annotations
+
+import argparse
+
+from common import ch, load_cfg, rows_sql, window_of
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('config')
+    ap.add_argument('day', help='YYYY-MM-DD')
+    ap.add_argument('hashes', nargs='+')
+    ap.add_argument('--print-sql', action='store_true')
+    a = ap.parse_args()
+    cfg = load_cfg(a.config)
+    sql = rows_sql(cfg, window_of(cfg, a.day), [h.upper() for h in a.hashes])
+    print(sql if a.print_sql else ch(sql, 'PrettyCompactNoEscapes'))
+
 
 if __name__ == '__main__':
-    args = sys.argv[3:]; key = None
-    if '--key' in args: i = args.index('--key'); key = args[i + 1]; del args[i:i + 2]
-    cfg = load_cfg(sys.argv[1]); m = meta(cfg)
-    if key: m = rekey(m, key)
-    lo, hi, extra = group_where(cfg, sys.argv[2])
-    khs = ', '.join(args)
-    # explicit column list: SELECT * skips MATERIALIZED columns and differs between sides
-    cols = ', '.join(m['key'] + m['vals'])
-    for side in ('old', 'new'):
-        print(f'== {side}')
-        print(ch(f"SELECT {key_expr(m)} kh, {cols} FROM {cfg[side]} "
-                 f"WHERE {side_where(cfg, side, lo, hi, extra)} AND kh IN ({khs}) ORDER BY kh", fmt='PrettyCompactNoEscapes'))
+    main()
