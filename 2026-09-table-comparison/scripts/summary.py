@@ -12,15 +12,12 @@ from collections import Counter, defaultdict
 from common import MAX_KEY_HASHES, OK_CATEGORIES, ResultRow, load_config, load_result, windows
 
 # Order in which categories are printed, roughly from most to least serious.
-CATEGORY_ORDER = ('only_old', 'only_new', 'value_diff', 'float_diff', 'new_multi', 'old_multi', 'float_noise',
-                  'equal')
+CATEGORY_ORDER = ('only_old', 'only_new', 'value_diff', 'float_diff', 'float_noise', 'equal')
 MEANING = {
     'only_old': 'key only in old: lost in new',
     'only_new': 'key only in new: added in new',
-    'value_diff': 'one version each, a non-float value differs',
-    'float_diff': 'one version each, a float differs by more than the tolerance',
-    'new_multi': "new has several different rows for the key: the key is coarser than new's sorting key",
-    'old_multi': "old has several different rows for the key: the key is coarser than old's sorting key",
+    'value_diff': 'a non-float value differs',
+    'float_diff': 'a float differs by more than the tolerance',
     'float_noise': 'floats differ within the tolerance',
     'equal': 'identical',
 }
@@ -72,7 +69,7 @@ def main() -> None:
         new_rows += row['new_rows']
     old_keys = sum(keys for category, keys in keys_per_category.items() if category != 'only_new')
     new_keys = sum(keys for category, keys in keys_per_category.items() if category != 'only_old')
-    # rows as FINAL shows them; more rows than keys means the configured key is coarser than the sorting key
+    # rows as FINAL shows them; equal to keys as long as the configured key identifies one row per table
     print(f'\nold: {old_rows:,} rows, {old_keys:,} keys')
     print(f'new: {new_rows:,} rows, {new_keys:,} keys')
     print('keys per host: ' + ', '.join(f'{host} {keys:,}' for host, keys in sorted(keys_per_host.items())))

@@ -6,7 +6,7 @@ Compares two versions of a ClickHouse table key by key, over the full history, r
 
 For each month (the tables' partition), one query:
 1. reduces every row of both tables to a key hash, a hash of the values and the float values,
-2. groups by the key hash, so the old and new versions of a key land in one row,
+2. groups by the key hash, so the old and new row of a key land side by side,
 3. gives each key a category,
 4. counts keys per day and category, keeping up to 10,000 key hashes per category for drill-down.
 
@@ -30,11 +30,11 @@ highest version). Unmerged copies are not differences.
 |---|---|
 | `equal` | identical |
 | `float_noise` | floats differ by at most 1e-9 relative; everything else is identical |
-| `old_multi` / `new_multi` | after `FINAL`, that side still has several different rows for the key: the configured key is coarser than the table's sorting key |
 | `value_diff` | one row on each side, and a non-float value differs |
 | `float_diff` | one row on each side, and a float differs by more than 1e-9 relative |
 | `only_old` / `only_new` | the key exists on one side only |
 
+The configured key must identify exactly one row per table under `FINAL`: the sorting key, or an equivalent.
 The keys are compared exactly as configured. A key column that the pipeline computes, such as `nonce` in stacks,
 is part of the test: a renumbering shows up as `only_old` + `only_new` pairs.
 

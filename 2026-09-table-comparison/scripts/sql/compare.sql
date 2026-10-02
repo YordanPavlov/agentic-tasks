@@ -14,7 +14,7 @@
 --
 -- Read it from the innermost layer outwards:
 --   1. every row of either table, as FINAL shows it, becomes (side, key hash, day, value hashes, float values)
---   2. GROUP BY the key hash puts the old and new versions of a key into one row
+--   2. GROUP BY the key hash puts the old and new row of a key side by side
 --   3. each key gets a category
 --   4. keys are counted per day and category
 SELECT
@@ -29,17 +29,15 @@ SELECT
 FROM
 (
     -- 3. Category per key, checked in this order.
-    --    *_row_hash: all compared values (floats exactly), so min != max means several different rows on that side.
-    --    *_values_hash: the non-float values only. Floats are compared separately, with the tolerance.
+    --    *_row_hash: all compared values (floats exactly). *_values_hash: the non-float values only;
+    --    floats are compared separately, with the tolerance.
     --    Floats are indexed rather than zipped, so a missing side (an empty array) cannot raise an error.
     SELECT
         key_hash, day, old_row_count, new_row_count,
         multiIf(
             new_row_count = 0,                          'only_old',
             old_row_count = 0,                          'only_new',
-            new_row_hash_min != new_row_hash_max,       'new_multi',
-            old_row_hash_min != old_row_hash_max,       'old_multi',
-            old_row_hash_min = new_row_hash_min,        'equal',
+            old_row_hash = new_row_hash,                'equal',
             old_values_hash != new_values_hash,         'value_diff',
             arrayAll(i -> old_floats[i] = new_floats[i]
                           OR (isNaN(old_floats[i]) AND isNaN(new_floats[i]))
@@ -50,22 +48,20 @@ FROM
                                                         'float_diff') AS category
     FROM
     (
-        -- 2. One row per key. FINAL leaves one row per sorting key of each table, so a side has several rows for a
-        --    key only if the configured key is coarser than that table's sorting key; min != max detects it.
-        --    The float and values-hash minimums are only read once both sides have a single distinct row.
+        -- 2. One row per key, holding that key's old and new row side by side. The configured key identifies one
+        --    row per table under FINAL (it is each table's sorting key or an equivalent), so each side has at most
+        --    one row and anyIf() picks it.
         SELECT
             cmp_key_hash AS key_hash,
             min(cmp_day) AS day,
             countIf(cmp_is_new = 0) AS old_row_count,
             countIf(cmp_is_new = 1) AS new_row_count,
-            minIf(cmp_row_hash, cmp_is_new = 0) AS old_row_hash_min,
-            maxIf(cmp_row_hash, cmp_is_new = 0) AS old_row_hash_max,
-            minIf(cmp_row_hash, cmp_is_new = 1) AS new_row_hash_min,
-            maxIf(cmp_row_hash, cmp_is_new = 1) AS new_row_hash_max,
-            minIf(cmp_values_hash, cmp_is_new = 0) AS old_values_hash,
-            minIf(cmp_values_hash, cmp_is_new = 1) AS new_values_hash,
-            minIf(cmp_floats, cmp_is_new = 0) AS old_floats,
-            minIf(cmp_floats, cmp_is_new = 1) AS new_floats
+            anyIf(cmp_row_hash, cmp_is_new = 0) AS old_row_hash,
+            anyIf(cmp_row_hash, cmp_is_new = 1) AS new_row_hash,
+            anyIf(cmp_values_hash, cmp_is_new = 0) AS old_values_hash,
+            anyIf(cmp_values_hash, cmp_is_new = 1) AS new_values_hash,
+            anyIf(cmp_floats, cmp_is_new = 0) AS old_floats,
+            anyIf(cmp_floats, cmp_is_new = 1) AS new_floats
         FROM
         (
             -- 1. Both tables unified, read with FINAL: what consumers see, i.e. the latest inserted row per sorting
