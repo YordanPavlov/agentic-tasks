@@ -10,7 +10,7 @@ import os
 import re
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from string import Template
@@ -37,26 +37,12 @@ RETRYABLE_ERROR_CODES = {'32', '209', '210'}
 
 # ---------- ClickHouse access ----------
 
-@dataclass(frozen=True)
-class Query:
-    """SQL text plus the values of its {name:Type} query parameters, which the server substitutes."""
-    sql: str
-    parameters: dict[str, str] = field(default_factory=dict)
-
-    def printable(self) -> str:
-        """The query as clickhouse-client would need it: parameters as options, then the SQL."""
-        options = ''.join(f"-- --param_{name}={value}\n" for name, value in self.parameters.items())
-        return options + self.sql
-
-
-def run_query(query: Query, output_format: str = 'TSV', timeout_s: int = 1800) -> str:
+def run_query(sql: str, output_format: str = 'TSV', timeout_s: int = 1800) -> str:
     """Run one query with clickhouse-client and return its output. The format is passed as an option,
     because --format overrides a FORMAT clause anyway."""
     command = ['clickhouse-client', '-h', HOST, '--port', PORT, '-u', USER, f'--log_comment={LOG_COMMENT}',
                f'--max_execution_time={timeout_s}', '--output_format_json_quote_64bit_integers=0',
-               f'--format={output_format}',
-               *[f'--param_{name}={value}' for name, value in query.parameters.items()],
-               '--query', query.sql]
+               f'--format={output_format}', '--query', sql]
     for attempt in range(3):
         process = subprocess.run(command, capture_output=True, text=True)
         if process.returncode == 0:
@@ -65,11 +51,11 @@ def run_query(query: Query, output_format: str = 'TSV', timeout_s: int = 1800) -
         if not error_code or error_code.group(1) not in RETRYABLE_ERROR_CODES:
             break
         time.sleep(5 * (attempt + 1))
-    raise RuntimeError(f'{process.stderr[:800]}\n--- query ---\n{query.printable()[:2000]}')
+    raise RuntimeError(f'{process.stderr[:800]}\n--- query ---\n{sql[:2000]}')
 
 
-def run_query_json(query: Query, timeout_s: int = 1800) -> list[dict[str, object]]:
-    return [json.loads(line) for line in run_query(query, 'JSONEachRow', timeout_s).splitlines()]
+def run_query_json(sql: str, timeout_s: int = 1800) -> list[dict[str, object]]:
+    return [json.loads(line) for line in run_query(sql, 'JSONEachRow', timeout_s).splitlines()]
 
 
 # ---------- columns ----------
@@ -113,9 +99,7 @@ def strip_type(type_name: str) -> tuple[str, bool]:
 def table_types(table: str) -> dict[str, str]:
     """Column name -> type of a 'db.table'."""
     database, name = table.split('.', 1)
-    output = run_query(Query('SELECT name, type FROM system.columns '
-                             'WHERE database = {database:String} AND table = {table:String}',
-                             {'database': database, 'table': name}))
+    output = run_query(f"SELECT name, type FROM system.columns WHERE database = '{database}' AND table = '{name}'")
     return dict(line.split('\t') for line in output.splitlines())
 
 
@@ -135,8 +119,7 @@ def columns(config: Config) -> tuple[list[Column], list[Column]]:
 
 
 # ---------- SQL generation ----------
-# The SQL templates in sql/ hold the structure. Python only fills in the column lists of the config ($names) and
-# the values of the query parameters ({name:Type}).
+# The SQL templates in sql/ hold the structure; Python only fills in their $placeholders from the config.
 
 def hash_args(column: Column) -> str:
     """Argument(s) that hash the same on both sides. Hash functions return NULL for a NULL argument, hence
@@ -157,13 +140,14 @@ def float_value(column: Column) -> str:
     return f'toFloat64(ifNull({column.name}, 0))' if column.nullable else f'toFloat64({column.name})'
 
 
-def column_lists(config: Config) -> dict[str, str]:
-    """The $placeholders of the templates: comma-separated column lists and the config's filters."""
+def placeholders(config: Config, window: Window) -> dict[str, str]:
+    """The $placeholders shared by the templates: tables, window, column lists and the config's filters."""
     keys, values = columns(config)
     floats = [column for column in values if column.is_float]
     exact = [hash_args(column) for column in values if not column.is_float]
     exact += [f'isNull({column.name})' for column in floats if column.nullable]
     return dict(
+        old_table=config.old, new_table=config.new, dt=config.dt, start=str(window.start), end=str(window.end),
         key_columns=', '.join(hash_args(column) for column in keys),
         exact_value_columns=', '.join(exact) or '0',
         float_value_columns=', '.join(float_value(column) for column in floats),
@@ -171,35 +155,25 @@ def column_lists(config: Config) -> dict[str, str]:
         where=config.where, where_old=config.where_old, where_new=config.where_new)
 
 
-def window_parameters(config: Config, window: Window) -> dict[str, str]:
-    """The query parameters shared by both templates: tables, partition column and window."""
-    old_database, old_table = config.old.split('.', 1)
-    new_database, new_table = config.new.split('.', 1)
-    return dict(old_database=old_database, old_table=old_table, new_database=new_database, new_table=new_table,
-                dt=config.dt, start=str(window.start), end=str(window.end))
-
-
-def from_template(file_name: str, config: Config, parameters: dict[str, str]) -> Query:
-    """A template with its column lists filled in, wrapped so that it runs where the data is.
+def from_template(file_name: str, config: Config, values: dict[str, str]) -> str:
+    """A template with its placeholders filled in, wrapped so that it runs where the data is.
     For a sharded table, cluster(view(...)) sends the whole query to one replica of each shard, and the caller
     gets the shards' results concatenated."""
-    sql = Template((SQL_DIR / file_name).read_text()).substitute(column_lists(config))
+    sql = Template((SQL_DIR / file_name).read_text()).substitute(values)
     if config.cluster is None:
-        return Query(f'SELECT * FROM (\n{sql}\n)', parameters)
-    return Query(f'SELECT * FROM cluster({{cluster:String}}, view(\n{sql}\n))',
-                 {**parameters, 'cluster': config.cluster})
+        return f'SELECT * FROM (\n{sql}\n)'
+    return f"SELECT * FROM cluster('{config.cluster}', view(\n{sql}\n))"
 
 
-def compare_query(config: Config, window: Window) -> Query:
+def compare_sql(config: Config, window: Window) -> str:
     return from_template('compare.sql', config, {
-        **window_parameters(config, window),
-        'tolerance': repr(FLOAT_TOLERANCE), 'max_key_hashes': str(MAX_KEY_HASHES)})
+        **placeholders(config, window), 'tolerance': repr(FLOAT_TOLERANCE), 'max_key_hashes': str(MAX_KEY_HASHES)})
 
 
-def rows_query(config: Config, window: Window, key_hashes: list[str]) -> Query:
-    query = from_template('rows.sql', config, {
-        **window_parameters(config, window), 'key_hashes': '[' + ', '.join(f"'{key_hash}'" for key_hash in key_hashes) + ']'})
-    return Query(query.sql + '\nORDER BY key_hash, side, host', query.parameters)
+def rows_sql(config: Config, window: Window, key_hashes: list[str]) -> str:
+    quoted_hashes = ', '.join(f"'{key_hash}'" for key_hash in key_hashes)
+    sql = from_template('rows.sql', config, {**placeholders(config, window), 'key_hashes': quoted_hashes})
+    return sql + '\nORDER BY key_hash, side, host'
 
 
 # ---------- windows and cache ----------

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import argparse
 
-from common import load_config, rows_query, run_query, window_of
+from common import load_config, rows_sql, run_query, window_of
 
 
 def main() -> None:
@@ -18,8 +18,8 @@ def main() -> None:
     parser.add_argument('--print-sql', action='store_true')
     args = parser.parse_args()
     config = load_config(args.config)
-    query = rows_query(config, window_of(config, args.day), [key_hash.upper() for key_hash in args.key_hashes])
-    print(query.printable() if args.print_sql else run_query(query, 'PrettyCompactNoEscapes'))
+    sql = rows_sql(config, window_of(config, args.day), [key_hash.upper() for key_hash in args.key_hashes])
+    print(sql if args.print_sql else run_query(sql, 'PrettyCompactNoEscapes'))
 
 
 if __name__ == '__main__':

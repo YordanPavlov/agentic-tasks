@@ -30,14 +30,9 @@ Ground rules:
 3. Each key gets a category (below).
 4. Keys are counted per day and category. Up to 10,000 key hashes per category are kept for drill-down.
 
-The query is in `scripts/sql/compare.sql` and is meant to be read. Its header lists every input:
-- **query parameters** (`{start:Date}`, `{old_table:Identifier}`, …): the server substitutes them, typed and
-  escaped.
-- **column lists from the config** (`$key_columns`, …): the only parts Python fills in, because a query parameter
-  cannot hold a list of columns.
-
-`compare.py <config> <month> --print-sql` prints the filled-in query, with its parameters as `--param_<name>`
-options for `clickhouse-client`.
+The query is in `scripts/sql/compare.sql` and is meant to be read. Its header lists every `$placeholder`: tables,
+window, tolerance, column lists and filters, all filled in from the config. `compare.py <config> <month>
+--print-sql` prints the filled-in query, ready to paste into `clickhouse-client`.
 
 **Where the query runs:**
 - **Sharded tables:** the query goes to one replica of every shard, via `cluster(..., view(...))`. Each shard

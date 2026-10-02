@@ -10,14 +10,9 @@ For each month (the tables' partition), one query:
 3. gives each key a category,
 4. counts keys per day and category, keeping up to 10,000 key hashes per category for drill-down.
 
-The query is in `sql/compare.sql` and is meant to be read. Its header lists every input:
-- **query parameters** (`{start:Date}`, `{old_table:Identifier}`, …): the server substitutes them, typed and
-  escaped.
-- **column lists from the config** (`$key_columns`, …): the only parts Python fills in, because a query parameter
-  cannot hold a list of columns.
-
-`compare.py <config> <month> --print-sql` prints the filled-in query, with its parameters as `--param_<name>`
-options for `clickhouse-client`.
+The query is in `sql/compare.sql` and is meant to be read. Its header lists every `$placeholder`: tables,
+window, tolerance, column lists and filters, all filled in from the config. `compare.py <config> <month>
+--print-sql` prints the filled-in query, ready to paste into `clickhouse-client`.
 
 Where it runs:
 - **Sharded tables** (`cluster` set in the config): `cluster(..., view(...))` sends the query to one replica of

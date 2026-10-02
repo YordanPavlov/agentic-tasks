@@ -1,17 +1,15 @@
 -- Compares one window (a month) of old and new key by key and counts keys per day and category.
 -- Runs on one shard against its local tables, or on the connected broker for a fully replicated table.
 --
--- Inputs
---   ClickHouse query parameters, typed and escaped by the server (compare.py passes them as --param_<name>):
---     {old_database:Identifier}.{old_table:Identifier}, {new_database:Identifier}.{new_table:Identifier}
---     {dt:Identifier}            the partition column; the window is [{start:Date}, {end:Date})
---     {tolerance:Float64}        relative tolerance for floats
---     {max_key_hashes:UInt32}    key hashes kept per day and category
---   Column lists from the config, filled in by common.py (a query parameter cannot hold a list of columns):
---     $key_columns               the key columns
---     $exact_value_columns       the non-float value columns, plus isNull() of nullable float columns
---     $float_value_columns       the float value columns, as Float64
---     $where, $where_old, $where_new   filters from the config
+-- Inputs, filled in by common.py from the config:
+--   $old_table, $new_table       'db.table' of the local tables
+--   $dt                          the partition column; the window is [$start, $end)
+--   $tolerance                   relative tolerance for floats
+--   $max_key_hashes              key hashes kept per day and category
+--   $key_columns                 the key columns
+--   $exact_value_columns         the non-float value columns, plus isNull() of nullable float columns
+--   $float_value_columns         the float value columns, as Float64
+--   $where, $where_old, $where_new   filters from the config
 --   Nullable columns arrive as isNull(c), ifNull(c, default), since a NULL argument makes a hash NULL.
 --
 -- Read it from the innermost layer outwards:
@@ -27,7 +25,7 @@ SELECT
     sum(old_row_count) AS old_rows,
     sum(new_row_count) AS new_rows,
     -- key hashes for rows.py and for the cross-shard check in summary.py; not kept for matching keys
-    groupArrayIf({max_key_hashes:UInt32})(hex(key_hash), category NOT IN ('equal', 'float_noise')) AS key_hashes
+    groupArrayIf($max_key_hashes)(hex(key_hash), category NOT IN ('equal', 'float_noise')) AS key_hashes
 FROM
 (
     -- 3. Category per key, checked in this order.
@@ -49,7 +47,7 @@ FROM
             arrayAll(i -> old_floats[i] = new_floats[i]
                           OR (isNaN(old_floats[i]) AND isNaN(new_floats[i]))
                           OR abs(old_floats[i] - new_floats[i])
-                             <= {tolerance:Float64} * greatest(abs(old_floats[i]), abs(new_floats[i])),
+                             <= $tolerance * greatest(abs(old_floats[i]), abs(new_floats[i])),
                      arrayEnumerate(old_floats)),
                                                         'float_noise',
                                                         'float_diff') AS category
@@ -77,22 +75,22 @@ FROM
             SELECT
                 0 AS cmp_is_new,
                 sipHash128($key_columns) AS cmp_key_hash,
-                toDate({dt:Identifier}) AS cmp_day,
+                toDate($dt) AS cmp_day,
                 cityHash64($exact_value_columns) AS cmp_values_hash,
                 CAST([$float_value_columns], 'Array(Float64)') AS cmp_floats,
                 cityHash64(cmp_values_hash, arrayMap(f -> reinterpretAsUInt64(f), cmp_floats)) AS cmp_row_hash
-            FROM {old_database:Identifier}.{old_table:Identifier}
-            WHERE {dt:Identifier} >= {start:Date} AND {dt:Identifier} < {end:Date} AND ($where) AND ($where_old)
+            FROM $old_table
+            WHERE $dt >= '$start' AND $dt < '$end' AND ($where) AND ($where_old)
             UNION ALL
             SELECT
                 1 AS cmp_is_new,
                 sipHash128($key_columns) AS cmp_key_hash,
-                toDate({dt:Identifier}) AS cmp_day,
+                toDate($dt) AS cmp_day,
                 cityHash64($exact_value_columns) AS cmp_values_hash,
                 CAST([$float_value_columns], 'Array(Float64)') AS cmp_floats,
                 cityHash64(cmp_values_hash, arrayMap(f -> reinterpretAsUInt64(f), cmp_floats)) AS cmp_row_hash
-            FROM {new_database:Identifier}.{new_table:Identifier}
-            WHERE {dt:Identifier} >= {start:Date} AND {dt:Identifier} < {end:Date} AND ($where) AND ($where_new)
+            FROM $new_table
+            WHERE $dt >= '$start' AND $dt < '$end' AND ($where) AND ($where_new)
         )
         GROUP BY cmp_key_hash
     )

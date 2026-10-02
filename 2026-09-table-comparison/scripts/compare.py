@@ -5,7 +5,7 @@ usage: compare.py <config> [YYYY-MM ...] [--parallel N] [--force] [--print-sql]
   YYYY-MM       only these months (default: every month from start to cutoff)
   --parallel N  queries in flight at once (default 2, the limit for long queries on prod)
   --force       re-run months that are already cached, e.g. after the data changed
-  --print-sql   print the query of the first selected month, with its parameters, and exit
+  --print-sql   print the query of the first selected month and exit
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from common import (OK_CATEGORIES, MonthResult, ResultRow, Window, compare_query, fingerprint, load_config,
+from common import (OK_CATEGORIES, MonthResult, ResultRow, Window, compare_sql, fingerprint, load_config,
                     load_result, run_query_json, save_result, windows)
 from configs import Config
 
@@ -22,7 +22,7 @@ from configs import Config
 def run_window(config_name: str, config: Config, window: Window) -> MonthResult:
     started = time.monotonic()
     rows: list[ResultRow] = []
-    for row in run_query_json(compare_query(config, window), timeout_s=7200):
+    for row in run_query_json(compare_sql(config, window), timeout_s=7200):
         hashes = row['key_hashes']
         rows.append(ResultRow(
             host=str(row['host']), day=str(row['day']), category=str(row['category']), keys=int(str(row['keys'])),
@@ -58,7 +58,7 @@ def main() -> None:
     todo = [window for window in windows(config) if not args.months or window.name in args.months]
     if args.print_sql:
         if todo:
-            print(compare_query(config, todo[0]).printable())
+            print(compare_sql(config, todo[0]))
         return
     if not args.force:
         todo = [window for window in todo if load_result(args.config, config, window) is None]
