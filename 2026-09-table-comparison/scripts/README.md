@@ -21,8 +21,8 @@ Where it runs:
   reported as moved, not lost.
 - **Fully replicated tables** (`cluster=None`): the query runs on the broker the connection lands on.
 
-Duplicates are fine. Rows of a key that ReplacingMergeTree has not merged yet only raise the row counts. Identical
-duplicates are not a difference.
+Both sides are read with `FINAL`, i.e. as consumers see them: for each sorting key, the latest inserted row (or the
+highest version). Unmerged copies are not differences.
 
 ### Categories
 
@@ -30,10 +30,9 @@ duplicates are not a difference.
 |---|---|
 | `equal` | identical |
 | `float_noise` | floats differ by at most 1e-9 relative; everything else is identical |
-| `old_multi_new_matches` | old has several versions of the key, and one of them equals new |
-| `old_multi` / `new_multi` | that side has several different versions of the key |
-| `value_diff` | one version on each side, and a non-float value differs |
-| `float_diff` | one version on each side, and a float differs by more than 1e-9 relative |
+| `old_multi` / `new_multi` | after `FINAL`, that side still has several different rows for the key: the configured key is coarser than the table's sorting key |
+| `value_diff` | one row on each side, and a non-float value differs |
+| `float_diff` | one row on each side, and a float differs by more than 1e-9 relative |
 | `only_old` / `only_new` | the key exists on one side only |
 
 The keys are compared exactly as configured. A key column that the pipeline computes, such as `nonce` in stacks,

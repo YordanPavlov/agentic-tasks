@@ -42,8 +42,10 @@ window, tolerance, column lists and filters, all filled in from the config. `com
     not lost.
 - **Fully replicated tables** (`cluster=None`): the query runs on the broker the connection lands on.
 
-**Duplicates are harmless.** ReplacingMergeTree rows of the same key that have not merged yet only raise the row
-counts. A month that was inserted twice shows up as duplicate rows, not as a difference.
+**Both sides are read with `FINAL`, i.e. as consumers see them.** For each sorting key, ReplacingMergeTree keeps the
+latest inserted row, or the row with the highest version for a table with a version column. `FINAL` applies that
+rule at read time: unmerged copies, and a month inserted twice, are not differences. Only the row a consumer would
+get is compared. `FINAL` applies per shard, which is one more reason the co-location above matters.
 
 ### Categories
 
@@ -51,11 +53,9 @@ counts. A month that was inserted twice shows up as duplicate rows, not as a dif
 |---|---|---|
 | `equal` | identical | OK |
 | `float_noise` | floats differ by at most 1e-9 relative, everything else identical | OK |
-| `old_multi_new_matches` | old has several versions of the key, one equals new | old's unmerged duplicates; benign |
-| `old_multi` | old has several versions, none equals new | look at the rows |
-| `new_multi` | new has several versions of the key | new-side problem, or the backfill is still merging |
-| `value_diff` | one version on each side, a non-float value differs | look at the rows |
-| `float_diff` | one version on each side, a float differs by more than 1e-9 | look at the rows |
+| `old_multi` / `new_multi` | after `FINAL`, that side still has several different rows for the key | the configured key is coarser than that table's sorting key (see "Key changes") |
+| `value_diff` | one row on each side, a non-float value differs | look at the rows |
+| `float_diff` | one row on each side, a float differs by more than 1e-9 | look at the rows |
 | `only_old` | key only in old | lost in new, a renumbered key, or a key change (below) |
 | `only_new` | key only in new | added in new (e.g. recovered data), a renumbered key, or a key change |
 
@@ -154,8 +154,8 @@ They catch errors that old and new share, which a comparison cannot see:
 
 ### Cost
 
-- Observed: stacks 2024-01, 750M rows on both sides together, took 250 s (~3M rows/s) on 2026-10-02 at midday.
-  Small months take 1–2 s.
+- Observed: stacks 2024-01, 750M rows on disk on both sides together, took 203–284 s with `FINAL` and without it,
+  depending on load (~3M rows/s). Small months take 1–2 s.
 - Cluster load can change the speed by an order of magnitude. Check the load with
   `SELECT count(), countIf(elapsed > 60) FROM system.processes` (that sees one broker only), and prefer evenings
   and weekends.
@@ -188,7 +188,7 @@ They catch errors that old and new share, which a comparison cannot see:
 # <old> vs <new>: <PASS | PASS with caveats | DIFFERS>
 Scope: <start> .. <cutoff>, months run / skipped; rows and keys per side; run date; wall time.
 Verdict: one or two sentences (e.g. "new ⊇ old, equal within 1e-9; new recovers N keys on <days>").
-| category | keys | where | cause |    (one row per category that is not OK, plus duplicates per side)
+| category | keys | where | cause |    (one row per category that is not OK)
 Discrepancies: per class: size, where (dates), cause if found (with a sample row from rows.py), benign or not.
 Not checked: months skipped, invariants not run, open questions (e.g. backfill end date).
 ```
@@ -207,13 +207,14 @@ Not checked: months skipped, invariants not run, open questions (e.g. backfill e
 - Stacks 2024-01-03 categories match the earlier Tier 2 run: 61,369 `only_old`/`only_new` pairs; 3,879
   `value_diff` + 112 `old_multi` + 1 `float_diff` = Tier 2's 3,992 `value_diff`.
 - **Stacks 2024-01, under the strict rule: DIFFERS.**
-  - old: 498M rows, i.e. the whole month twice; new: 249M rows. Both sides have 249,166,962 keys.
+  - old: 498M rows on disk, i.e. the whole month twice. With `FINAL`, both sides have 249,030,813 rows.
   - 1.9M `only_old`/`only_new` pairs: the `nonce` renumbering.
-  - 96k `value_diff`, 1,660 `old_multi`, 8 `float_diff`.
-  - 1.7M `old_multi_new_matches`.
-  - No key moved between shards.
-- Balances 2013-02: 7 `old_multi_new_matches`. Old holds the same row twice with balances that differ in the last
-  ULP (8.114739e-9 vs 8.114739000000001e-9).
+  - 97,924 `value_diff`, 8 `float_diff`. No key moved between shards.
+  - `FINAL` vs a plain read of the same month: 284 s vs 203 s, under heavier load (17 queries over 60 s).
+    - The plain read's 1.7M `old_multi_new_matches` became `equal`: the latest version is the one that matches.
+    - Its 1,660 `old_multi` became `value_diff`: the version consumers see differs from new.
+- Balances 2013-02: equal under `FINAL`. Old holds one row twice, with balances that differ in the last ULP
+  (8.114739e-9 vs 8.114739000000001e-9). `FINAL` returns the newer copy (part `201302_4_4_0`), and it equals new.
 - Side finding (2026-09-30): 2013 stack rows with `sign = 1` have `odt = 1970-01-01` on both sides.
 - Cache of these runs: `~/.cache/table-cmp-v2/`.
 
