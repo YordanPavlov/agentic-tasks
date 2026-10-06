@@ -23,12 +23,18 @@ devops `hprod/k8s-apps/flink-jobs-operator/xrp/xrp-stacks-v7/values.helm.yaml`, 
   is now 3 on one TM, instead of 9 on 3 TMs. The autoscaler may scale it back up. Absolute
   RSS is therefore not comparable with the pre-change numbers; compare the slope only.
 
-**Reading the result:** expected RSS ceiling ≈ 5.6G heap + 1.1G direct + 0.2G non-heap +
-1.5G cache + memtables/jemalloc slack, so **~9–10G**.
+**Watch native memory, not total RSS.** Pod size is fixed, so shrinking managed memory moved
+4G to the heap (Xmx 5.6G → 9.6G). G1 touches that heap gradually, so `container_memory_rss`
+climbs toward ~13G (9.6G heap + ~3.5G native) for hours even without a leak. Measure anon RSS
+outside the heap range from smaps (see Method notes).
 
-- RSS plateaus there, with `block-cache-usage` flat at its cap: it was cache fill. Restore the
-  managed size, or keep it smaller if checkpoints and backpressure looked fine.
-- RSS keeps climbing at a steady rate while the cache is flat: it is a native leak. Next step
+- Baseline at 09:51 UTC (+15 min): native anon **2.85 GiB** (≈1.1G direct, ≈1.1G cache,
+  0.2G metaspace, slack), heap resident 5.9G, `block-cache-usage` 350–377 MiB of ~512 MiB per
+  slot, memtables ~0, table readers <1 MiB.
+- Native plateaus at **~3.3–3.6 GiB** once the cache sits at ~0.5G per slot: it was cache fill.
+  Restore the managed size, or keep it smaller if checkpoints and backpressure looked fine.
+- Native keeps climbing at the old ~1.5–2 GiB/day (≥4.5G by 2026-10-07) while the cache is
+  flat: it is a native leak. Next step
   is jemalloc heap profiling (`jeprof` is already in the image, as done for eth-stacks-v12):
   `MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:/tmp/jeprof/jeprof` on the TMs, then
   diff dumps a few hours apart.
@@ -85,6 +91,11 @@ Also watch checkpoint duration and backpressure, since the smaller cache means m
   is ~150 MB, so dumps are ~55 MB and take <1 s), `/proc/1/smaps` (heap range vs other anon),
   `/proc/net/tcp*` (:443 = `01BB`, CLOSE_WAIT = `08`, rx_queue >64B = unread body vs TLS
   close_notify).
+- Native vs heap RSS: get the heap range from `jcmd 1 GC.heap_info` (the
+  `[0x…, 0x…)` pair), then sum `Rss:` in `/proc/1/smaps` for anonymous mappings outside it.
+- ForSt metrics without Prometheus: JM REST
+  `/jobs/<job>/vertices/<Create stack changes id>/subtasks/<n>/metrics`, ids `*.rocksdb_*`.
+  The cache is shared per slot, so every column family reports the same `block-cache-usage`.
 - Memory history: Prometheus at `monitoring/prometheus-operated:9090` via
   `kubectl get --raw /api/v1/namespaces/monitoring/services/prometheus-operated:9090/proxy/api/v1/query_range?...`,
   `container_memory_rss` (about 2 days of retention).
