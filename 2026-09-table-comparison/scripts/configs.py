@@ -6,8 +6,7 @@ Fields of Config:
                tables, which relies on old and new using the same sharding (see README.md).
                None for a table fully replicated to every broker: it is compared on the connected broker.
   dt           DateTime/Date column the tables are partitioned by. Work is done one month at a time.
-  keys         Columns identifying exactly one row in each table as FINAL shows it: the ReplacingMergeTree
-               sorting key, or an equivalent (stacks: blockNumber in place of dt, which follows from it).
+  keys         Columns identifying a row: the ReplacingMergeTree sorting key, or the key you want to compare by.
   values       Columns compared for each key. Float columns are compared with a relative tolerance,
                everything else exactly.
   start, cutoff  'YYYY-MM-DD'; cutoff is exclusive. Leave the live tail out: it is still being written.

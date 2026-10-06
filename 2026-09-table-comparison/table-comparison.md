@@ -1,8 +1,8 @@
 # Comparing an old and a new version of a table (runbook)
 
 **Started:** 2026-09-30
-**Status (2026-10-02):** Single-pass, per-month comparison (`scripts/`): both sides read with `FINAL`, one row per
-key and side. Validated on XRP balances and stacks months; no full run with the new scripts yet (see "Runs").
+**Status:** Single-pass, per-month comparison (`scripts/`), in place since 2026-10-02. Validated on XRP balances
+and stacks months; no full run with the new scripts yet (see "Runs").
 **Origin:** [`2026-09-rerun-comparison-framework`](../2026-09-rerun-comparison-framework/rerun-comparison-framework.md)
 has the development history and the first XRP balances results.
 
@@ -26,7 +26,7 @@ Ground rules:
 
 `compare.py` runs one query per month (the tables' partition), which reads each table once:
 1. Every row of both tables becomes a key hash, a hash of the values and the float values.
-2. Grouping by the key hash puts the old and new row of each key side by side.
+2. Grouping by the key hash puts the old and new versions of each key into one row.
 3. Each key gets a category (below).
 4. Keys are counted per day and category. Up to 10,000 key hashes per category are kept for drill-down.
 
@@ -53,6 +53,7 @@ get is compared. `FINAL` applies per shard, which is one more reason the co-loca
 |---|---|---|
 | `equal` | identical | OK |
 | `float_noise` | floats differ by at most 1e-9 relative, everything else identical | OK |
+| `old_multi` / `new_multi` | after `FINAL`, that side still has several different rows for the key | the configured key is coarser than that table's sorting key (see "Key changes") |
 | `value_diff` | one row on each side, a non-float value differs | look at the rows |
 | `float_diff` | one row on each side, a float differs by more than 1e-9 | look at the rows |
 | `only_old` | key only in old | lost in new, a renumbered key, or a key change (below) |
@@ -96,8 +97,7 @@ Plain Python 3.11 plus `clickhouse-client`. The code is typed (`mypy --strict *.
 - `old`, `new`: the **local** tables, not the Distributed ones. The Distributed table's engine names them:
   `SELECT engine_full FROM system.tables WHERE database='default' AND name='xrp_balances'`.
 - `cluster`: the cluster named in that same engine definition. `None` for a table that every broker holds in full.
-- `keys`: the columns that identify exactly one row per table: the ReplacingMergeTree sorting key, or an
-  equivalent (see "Key changes").
+- `keys`: the columns that identify a row, normally the ReplacingMergeTree sorting key.
 - `values`: every other column that matters. Leave out bookkeeping columns that always differ (`computed_at`,
   insert time).
 - `start`, `cutoff`: `'YYYY-MM-DD'`. The cutoff is exclusive.
@@ -133,15 +133,13 @@ Plain Python 3.11 plus `clickhouse-client`. The code is typed (`mypy --strict *.
 
 ### Key changes
 
-The configured key must identify exactly one row in each table, as `FINAL` shows it: one key, one value, compared
-against the other table. When the two tables have different sorting keys, that holds only if the keys are
-equivalent, i.e. each one determines the other.
-- XRP stacks: old uses `(…, dt, nonce)` and new `(…, blockNumber, nonce)`. `dt` follows from `blockNumber`, so the
-  config uses new's key and compares `dt` as a value.
-- `summary.py` prints rows and keys per side. They are equal as long as the key holds; more rows than keys means
-  it doesn't.
-- Keys that are not equivalent deduplicate differently, and the tables can't be compared key by key as they are.
-  Which key is right is a question for the table's owner.
+When the two tables have different sorting keys, each side's ReplacingMergeTree has deduplicated by its own key.
+Rows that are distinct under one key can have been merged away under the other.
+- Choose the key to compare by explicitly. For XRP stacks, old uses `(…, dt, nonce)` and new `(…, blockNumber,
+  nonce)`. `dt` follows from `blockNumber`, so the config uses new's key and compares `dt` as a value.
+- To size the effect, run a second config with the other key and compare the summaries. A difference that
+  disappears under the other key comes from the key change, not the data. Which key is right is a design question
+  for the table's owner.
 
 ### Invariants (table-specific, not scripted)
 
@@ -178,8 +176,6 @@ They catch errors that old and new share, which a comparison cannot see:
 - `system.parts`, `system.processes` and `system.query_log` cover one broker. Use `cluster(...)` for the whole
   cluster, and measure time on the client.
 - `clickhouse-client --format` overrides a `FORMAT` clause in the query.
-- A capped key-hash list (10,000 per shard, day and category) holds whichever hashes arrived first, so it differs
-  between runs. Counts are deterministic.
 - The server quotes 64-bit integers in JSON. `common.run_query` turns that off.
 
 **Environment:**
@@ -224,12 +220,7 @@ Not checked: months skipped, invariants not run, open questions (e.g. backfill e
 
 ## Open
 
-- Full runs of `xrp_balances` and `xrp_stacks` with the new scripts, ideally off-peak.
-  - `test.xrp_stacks_test` was being written again on 2026-10-02 (`max(dt)` that day). Check whether that is
-    the backfill or live writes before the full run. If older months changed, re-run them with `--force`.
-- Measure the cost of `FINAL` off-peak. The single measurement was taken under heavy load.
-- Benchmark shard-local vs Distributed: unfinished. On stacks 2022-01, shard-local took 286 s. The Distributed
-  variant was still running after 320 s and held 14.8 GiB on the initiator.
-- Stacks: explain the `nonce` renumbering and the 98k `value_diff` with `rows.py`.
+- Full runs of `xrp_balances` and `xrp_stacks` with the new scripts.
+- Stacks: explain the `nonce` renumbering, the 96k `value_diff` and the 1,660 `old_multi` with `rows.py`.
 - A drill-down aid that marks `only_old`/`only_new` pairs differing only in `nonce`.
 - Script the invariants, starting with the balance chain.
