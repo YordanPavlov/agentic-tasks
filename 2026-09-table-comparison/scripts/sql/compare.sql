@@ -1,9 +1,10 @@
--- Compares one window (a month) of old and new key by key and counts keys per day and category.
--- Runs on one shard against its local tables, or on the connected broker for a fully replicated table.
+-- Compares one window (a key range, from bounds.sql) of old and new key by key and counts keys per day and
+-- category. Runs on one shard against its local tables, or on the connected broker for a fully replicated table.
 --
 -- Inputs, filled in by common.py from the config:
 --   $old_table, $new_table       'db.table' of the local tables
---   $dt                          the partition column; the window is [$start, $end)
+--   $dt                          the partition column; the comparison covers [$start, $end)
+--   $key_range                   the window: a range of a sorting-key prefix, written so the primary index applies
 --   $tolerance                   relative tolerance for floats
 --   $max_key_hashes              key hashes kept per day and category
 --   $key_columns                 the key columns
@@ -79,7 +80,7 @@ FROM
                 CAST([$float_value_columns], 'Array(Float64)') AS cmp_floats,
                 cityHash64(cmp_values_hash, arrayMap(f -> reinterpretAsUInt64(f), cmp_floats)) AS cmp_row_hash
             FROM $old_table FINAL
-            WHERE $dt >= '$start' AND $dt < '$end' AND ($where) AND ($where_old)
+            WHERE $dt >= '$start' AND $dt < '$end' AND ($key_range) AND ($where) AND ($where_old)
             UNION ALL
             SELECT
                 1 AS cmp_is_new,
@@ -89,7 +90,7 @@ FROM
                 CAST([$float_value_columns], 'Array(Float64)') AS cmp_floats,
                 cityHash64(cmp_values_hash, arrayMap(f -> reinterpretAsUInt64(f), cmp_floats)) AS cmp_row_hash
             FROM $new_table FINAL
-            WHERE $dt >= '$start' AND $dt < '$end' AND ($where) AND ($where_new)
+            WHERE $dt >= '$start' AND $dt < '$end' AND ($key_range) AND ($where) AND ($where_new)
         )
         GROUP BY cmp_key_hash
     )

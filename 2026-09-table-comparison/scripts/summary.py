@@ -1,5 +1,5 @@
 """Summarize the cached results of compare.py: coverage, keys per category, failing days, keys that moved
-between shards or months, sample key hashes for rows.py, and a verdict.
+between shards, sample key hashes for rows.py, and a verdict.
 
 usage: summary.py <config> [--days N]
   --days N   failing days to list (default 30, the largest first)
@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter, defaultdict
 
-from common import MAX_KEY_HASHES, OK_CATEGORIES, ResultRow, load_config, load_result, windows
+from common import MAX_KEY_HASHES, OK_CATEGORIES, ResultRow, load_bounds, load_config, load_result, windows
 
 # Order in which categories are printed, roughly from most to least serious.
 CATEGORY_ORDER = ('only_old', 'only_new', 'value_diff', 'float_diff', 'new_multi', 'old_multi', 'float_noise',
@@ -27,8 +27,8 @@ MEANING = {
 
 
 def moved_keys(rows: list[ResultRow]) -> tuple[int, bool]:
-    """Keys that are only_old in one (shard, month) and only_new in another, i.e. the same key placed
-    differently, not lost. Returns (count, complete); complete is False when some hash lists were capped."""
+    """Keys that are only_old on one shard and only_new on another, i.e. the same key placed differently, not
+    lost. Returns (count, complete); complete is False when some hash lists were capped."""
     hashes = {'only_old': set[str](), 'only_new': set[str]()}
     complete = True
     for row in rows:
@@ -45,22 +45,27 @@ def main() -> None:
     args = parser.parse_args()
     config = load_config(args.config)
 
+    print(f'# {config.old} vs {config.new}, {config.start} .. {config.cutoff} (exclusive)')
+    bounds = load_bounds(args.config, config)
+    if bounds is None:
+        print('\nverdict: INCOMPLETE: no windows yet, or the config changed; run compare.py')
+        return
+
     rows: list[ResultRow] = []
-    missing_months: list[str] = []
+    missing_windows: list[str] = []
     query_time_s = 0.0
-    for window in windows(config):
-        result = load_result(args.config, config, window)
+    for window in windows(bounds):
+        result = load_result(args.config, bounds, window)
         if result is None:
-            missing_months.append(window.name)
+            missing_windows.append(window.name)
         else:
             rows += result['rows']
             query_time_s += result['elapsed_s']
 
-    month_count = len(windows(config))
-    missing_list = f": {', '.join(missing_months[:12])}{' …' if len(missing_months) > 12 else ''}"
-    print(f'# {config.old} vs {config.new}, {config.start} .. {config.cutoff} (exclusive)')
-    print(f'months: {month_count - len(missing_months)} done, {len(missing_months)} missing or stale'
-          + (missing_list if missing_months else '') + f'; query time {query_time_s / 60:.0f} min')
+    window_count = len(windows(bounds))
+    missing_list = f": {', '.join(missing_windows[:12])}{' …' if len(missing_windows) > 12 else ''}"
+    print(f'windows: {window_count - len(missing_windows)} done, {len(missing_windows)} missing'
+          + (missing_list if missing_windows else '') + f'; query time {query_time_s / 60:.0f} min')
 
     keys_per_category = Counter[str]()
     keys_per_host = Counter[str]()
@@ -85,8 +90,8 @@ def main() -> None:
 
     if keys_per_category['only_old'] or keys_per_category['only_new']:
         moved, complete = moved_keys(rows)
-        caveat = f' (lower bound: hash lists are capped at {MAX_KEY_HASHES:,} per shard, day and category)'
-        print(f'\nkeys only_old in one shard/month and only_new in another: {moved:,}' + ('' if complete else caveat))
+        caveat = f' (lower bound: hash lists are capped at {MAX_KEY_HASHES:,} per window, shard, day and category)'
+        print(f'\nkeys only_old on one shard and only_new on another: {moved:,}' + ('' if complete else caveat))
 
     differing_rows = [row for row in rows if row['category'] not in OK_CATEGORIES]
     differences_per_day: dict[str, Counter[str]] = defaultdict(Counter)
@@ -104,8 +109,8 @@ def main() -> None:
                 shown.add(row['category'])
                 print(f"  {row['category']:<22} {row['day']}  {' '.join(row['key_hashes'][:3])}")
 
-    if missing_months:
-        verdict = 'INCOMPLETE: months missing'
+    if missing_windows:
+        verdict = 'INCOMPLETE: windows missing'
     elif not differences_per_day:
         verdict = 'PASS: every key equal (floats within tolerance)'
     else:

@@ -1,5 +1,5 @@
 """Shared pieces of the old-vs-new table comparison: ClickHouse access, column metadata, SQL generation from
-the templates in sql/, and the per-month result cache. README.md describes the method.
+the templates in sql/, the windows and the result cache. README.md describes the method.
 """
 from __future__ import annotations
 
@@ -25,7 +25,9 @@ CACHE_DIR = Path(os.environ.get('TCMP_CACHE', '~/.cache/table-cmp')).expanduser(
 SQL_DIR = Path(__file__).parent / 'sql'
 
 FLOAT_TOLERANCE = 1e-9   # relative
-MAX_KEY_HASHES = 10_000  # kept per (shard, day, category) for drill-down and the cross-shard check
+MAX_KEY_HASHES = 10_000  # kept per (window, shard, day, category) for drill-down and the cross-shard check
+# Rows per shard and window, both sides as on disk. A query takes ~350 bytes per row (XRP balances), ~7 GiB here.
+WINDOW_ROWS = int(os.environ.get('TCMP_WINDOW_ROWS', 20_000_000))
 LOG_COMMENT = json.dumps({'job': 'table-compare', 'owner': 'yordan.p@santiment.net', 'team': 'bigdata',
                           'repo': 'clickhouse-tables', 'dag': 'manual-tests'})
 
@@ -140,14 +142,14 @@ def float_value(column: Column) -> str:
     return f'toFloat64(ifNull({column.name}, 0))' if column.nullable else f'toFloat64({column.name})'
 
 
-def placeholders(config: Config, window: Window) -> dict[str, str]:
-    """The $placeholders shared by the templates: tables, window, column lists and the config's filters."""
+def placeholders(config: Config, start: str, end: str) -> dict[str, str]:
+    """The $placeholders shared by the templates: tables, time range, column lists and the config's filters."""
     keys, values = columns(config)
     floats = [column for column in values if column.is_float]
     exact = [hash_args(column) for column in values if not column.is_float]
     exact += [f'isNull({column.name})' for column in floats if column.nullable]
     return dict(
-        old_table=config.old, new_table=config.new, dt=config.dt, start=str(window.start), end=str(window.end),
+        old_table=config.old, new_table=config.new, dt=config.dt, start=start, end=end,
         key_columns=', '.join(hash_args(column) for column in keys),
         exact_value_columns=', '.join(exact) or '0',
         float_value_columns=', '.join(float_value(column) for column in floats),
@@ -167,42 +169,128 @@ def from_template(file_name: str, config: Config, values: dict[str, str]) -> str
 
 def compare_sql(config: Config, window: Window) -> str:
     return from_template('compare.sql', config, {
-        **placeholders(config, window), 'tolerance': repr(FLOAT_TOLERANCE), 'max_key_hashes': str(MAX_KEY_HASHES)})
+        **placeholders(config, config.start, config.cutoff), 'key_range': window.key_range,
+        'tolerance': repr(FLOAT_TOLERANCE), 'max_key_hashes': str(MAX_KEY_HASHES)})
 
 
-def rows_sql(config: Config, window: Window, key_hashes: list[str]) -> str:
+def rows_sql(config: Config, day: str, key_hashes: list[str]) -> str:
+    """The rows of the given key hashes in the calendar month of day: a key whose day differs between old and new
+    usually still has both versions in that month."""
+    month_start = datetime.date.fromisoformat(day).replace(day=1)
+    month_end = (month_start + datetime.timedelta(days=32)).replace(day=1)
+    start, end = max(str(month_start), config.start), min(str(month_end), config.cutoff)
     quoted_hashes = ', '.join(f"'{key_hash}'" for key_hash in key_hashes)
-    sql = from_template('rows.sql', config, {**placeholders(config, window), 'key_hashes': quoted_hashes})
+    sql = from_template('rows.sql', config, {**placeholders(config, start, end), 'key_hashes': quoted_hashes})
     return sql + '\nORDER BY key_hash, side, host'
 
 
-# ---------- windows and cache ----------
+# ---------- windows ----------
+# The comparison is split into ranges of a sorting-key prefix ("windows"), so each query aggregates a bounded
+# number of keys and the primary index limits what it reads. bounds.sql derives them once from the tables' indexes.
 
-@dataclass(frozen=True)
-class Window:
-    """Days [start, end): one calendar month, cut to the configured start and cutoff."""
-    start: datetime.date
-    end: datetime.date
-
-    @property
-    def name(self) -> str:
-        return self.start.strftime('%Y-%m')
+def sorting_key(table: str) -> list[str]:
+    database, name = table.split('.', 1)
+    output = run_query(f"SELECT sorting_key FROM system.tables WHERE database = '{database}' AND name = '{name}'")
+    return output.strip().split(', ')
 
 
-def windows(config: Config) -> list[Window]:
-    start, cutoff = datetime.date.fromisoformat(config.start), datetime.date.fromisoformat(config.cutoff)
-    result, window_start = [], start
-    while window_start < cutoff:
-        next_month = (window_start.replace(day=1) + datetime.timedelta(days=32)).replace(day=1)
-        result.append(Window(window_start, min(next_month, cutoff)))
-        window_start = next_month
+def bound_columns(config: Config) -> list[Column]:
+    """The columns windows are cut on: the longest prefix shared by both sorting keys of plain key columns with the
+    same non-nullable type on both sides. Rows with the same key then always fall in the same window."""
+    keys = {column.name: column for column in columns(config)[0]}
+    result = []
+    for old_name, new_name in zip(sorting_key(config.old), sorting_key(config.new)):
+        column = keys.get(old_name)
+        if old_name != new_name or column is None or column.nullable or not column.same_type:
+            break
+        result.append(column)
+    if not result:
+        raise RuntimeError('the sorting keys of old and new share no prefix of key columns to cut windows on')
     return result
 
 
-def window_of(config: Config, day: str) -> Window:
-    date = datetime.date.fromisoformat(day)
-    return next(window for window in windows(config) if window.start <= date < window.end)
+def literal_sql(column: Column) -> str:
+    """An expression that renders the column's value as an SQL literal; strings go through hex so any bytes survive."""
+    if column.base_type.startswith(('String', 'FixedString')):
+        return f"concat('unhex(''', hex({column.name}), ''')')"
+    if column.base_type.startswith(('Int', 'UInt', 'Float', 'Decimal', 'Bool')):
+        return f'toString({column.name})'
+    return f"concat('''', toString({column.name}), '''')"  # dates, times and the like contain no quotes
 
+
+class Bound(TypedDict):
+    """The first key of a window: one SQL literal per bound column, and a readable label."""
+    literals: list[str]
+    label: str
+
+
+class Bounds(TypedDict):
+    fingerprint: str
+    columns: list[str]
+    bounds: list[Bound]
+
+
+def compute_bounds(config: Config) -> Bounds:
+    bound = bound_columns(config)
+    names = ', '.join(column.name for column in bound)
+    (old_database, old_name), (new_database, new_name) = config.old.split('.', 1), config.new.split('.', 1)
+    index_entries = from_template('index.sql', config, dict(
+        old_database=old_database, old_name=old_name, new_database=new_database, new_name=new_name,
+        bound_columns=names, bound_literals=f"[{', '.join(literal_sql(column) for column in bound)}]",
+        start=config.start, end=config.cutoff))
+    sql = Template((SQL_DIR / 'bounds.sql').read_text()).substitute(
+        index_entries=index_entries, bound_columns=names, window_rows=str(WINDOW_ROWS))
+    bounds: list[Bound] = []
+    for row in run_query_json(sql, timeout_s=600):
+        literals = [str(literal) for literal in row['literals']] if isinstance(row['literals'], list) else []
+        if not bounds or bounds[-1]['literals'] != literals:  # several granules can start with the same prefix
+            bounds.append(Bound(literals=literals, label=str(row['label'])))
+    return Bounds(fingerprint=fingerprint(config), columns=[column.name for column in bound], bounds=bounds)
+
+
+def key_order(names: list[str], literals: list[str], strict: str, last: str) -> str:
+    """The lexicographic comparison (names) <op> (literals), expanded into column comparisons: the primary index
+    is not used for a comparison of tuples."""
+    if len(names) == 1:
+        return f'{names[0]} {last} {literals[0]}'
+    rest = key_order(names[1:], literals[1:], strict, last)
+    return f'({names[0]} {strict} {literals[0]} OR ({names[0]} = {literals[0]} AND {rest}))'
+
+
+@dataclass(frozen=True)
+class Window:
+    """One query of the comparison: the keys from lower (inclusive) to upper (exclusive); None is unbounded."""
+    index: int
+    count: int
+    columns: tuple[str, ...]
+    lower: tuple[str, ...] | None
+    upper: tuple[str, ...] | None
+    label: str  # the lower bound, readable
+
+    @property
+    def name(self) -> str:
+        return f'{self.index:04d}'
+
+    @property
+    def key_range(self) -> str:
+        conditions = []
+        if self.lower is not None:
+            conditions.append(key_order(list(self.columns), list(self.lower), '>', '>='))
+        if self.upper is not None:
+            conditions.append(key_order(list(self.columns), list(self.upper), '<', '<'))
+        return ' AND '.join(conditions) or '1'
+
+
+def windows(bounds: Bounds) -> list[Window]:
+    edges: list[Bound | None] = [None, *bounds['bounds'], None]
+    return [Window(index=index, count=len(edges) - 1, columns=tuple(bounds['columns']),
+                   lower=None if lower is None else tuple(lower['literals']),
+                   upper=None if upper is None else tuple(upper['literals']),
+                   label='start' if lower is None else lower['label'])
+            for index, (lower, upper) in enumerate(zip(edges, edges[1:]))]
+
+
+# ---------- cache ----------
 
 def load_config(name: str) -> Config:
     if name not in CONFIGS:
@@ -211,12 +299,17 @@ def load_config(name: str) -> Config:
 
 
 def fingerprint(config: Config) -> str:
-    """Changes whenever the config, the SQL templates or the constants change; cached results with another
-    fingerprint are stale."""
-    digest = hashlib.sha256(repr((config, FLOAT_TOLERANCE, MAX_KEY_HASHES)).encode())
+    """Changes whenever the config, the SQL templates or the constants change; cached bounds with another
+    fingerprint are stale, and so are the results computed with them."""
+    digest = hashlib.sha256(repr((config, FLOAT_TOLERANCE, MAX_KEY_HASHES, WINDOW_ROWS)).encode())
     for path in sorted(SQL_DIR.glob('*.sql')):
         digest.update(path.read_bytes())
     return digest.hexdigest()[:16]
+
+
+def bounds_fingerprint(bounds: Bounds) -> str:
+    """Identifies the bounds a result was computed with; they include the config's fingerprint."""
+    return hashlib.sha256(json.dumps(bounds, sort_keys=True).encode()).hexdigest()[:16]
 
 
 class ResultRow(TypedDict):
@@ -230,30 +323,48 @@ class ResultRow(TypedDict):
     key_hashes: list[str]
 
 
-class MonthResult(TypedDict):
+class WindowResult(TypedDict):
     fingerprint: str
-    start: str
-    end: str
     elapsed_s: float
     rows: list[ResultRow]
 
 
+def write_json(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(value))
+    temporary.replace(path)  # atomic, so an interrupted run never leaves a half-written file
+
+
+def bounds_path(config_name: str) -> Path:
+    return CACHE_DIR / config_name / 'bounds.json'
+
+
+def load_bounds(config_name: str, config: Config) -> Bounds | None:
+    """The cached bounds, or None if they are missing or stale."""
+    path = bounds_path(config_name)
+    if not path.exists():
+        return None
+    bounds: Bounds = json.loads(path.read_text())
+    return bounds if bounds['fingerprint'] == fingerprint(config) else None
+
+
+def save_bounds(config_name: str, bounds: Bounds) -> None:
+    write_json(bounds_path(config_name), bounds)
+
+
 def result_path(config_name: str, window: Window) -> Path:
-    return CACHE_DIR / config_name / f'{window.name}.json'
+    return CACHE_DIR / config_name / f'window-{window.name}.json'
 
 
-def load_result(config_name: str, config: Config, window: Window) -> MonthResult | None:
-    """The cached result of a window, or None if it is missing or stale."""
+def load_result(config_name: str, bounds: Bounds, window: Window) -> WindowResult | None:
+    """The cached result of a window, or None if it is missing or was computed with other bounds."""
     path = result_path(config_name, window)
     if not path.exists():
         return None
-    result: MonthResult = json.loads(path.read_text())
-    return result if result['fingerprint'] == fingerprint(config) else None
+    result: WindowResult = json.loads(path.read_text())
+    return result if result['fingerprint'] == bounds_fingerprint(bounds) else None
 
 
-def save_result(config_name: str, window: Window, result: MonthResult) -> None:
-    path = result_path(config_name, window)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix('.tmp')
-    temporary.write_text(json.dumps(result))
-    temporary.replace(path)  # atomic, so an interrupted run never leaves a half-written result
+def save_result(config_name: str, window: Window, result: WindowResult) -> None:
+    write_json(result_path(config_name, window), result)

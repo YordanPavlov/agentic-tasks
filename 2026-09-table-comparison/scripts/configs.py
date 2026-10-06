@@ -5,7 +5,7 @@ Fields of Config:
   cluster      Cluster whose shards hold the tables, for sharded tables. Each shard compares its own local
                tables, which relies on old and new using the same sharding (see README.md).
                None for a table fully replicated to every broker: it is compared on the connected broker.
-  dt           DateTime/Date column the tables are partitioned by. Work is done one month at a time.
+  dt           DateTime/Date column the tables are partitioned by; [start, cutoff) is a range of it.
   keys         Columns identifying a row: the ReplacingMergeTree sorting key, or the key you want to compare by.
   values       Columns compared for each key. Float columns are compared with a relative tolerance,
                everything else exactly.

@@ -1,18 +1,37 @@
 # Old-vs-new table comparison
 
-Compares two versions of a ClickHouse table key by key, over the full history, reading each partition once.
+Compares two versions of a ClickHouse table key by key, over the full history, reading each granule about once.
 
 ## Method
 
-For each month (the tables' partition), one query:
+The key space is split into **windows**: ranges of a prefix of the sorting key, of about 20M rows per shard
+(both sides together; `TCMP_WINDOW_ROWS`), which takes about 7 GiB per query. For each window, one
+query:
 1. reduces every row of both tables to a key hash, a hash of the values and the float values,
 2. groups by the key hash, so the old and new versions of a key land in one row,
 3. gives each key a category,
 4. counts keys per day and category, keeping up to 10,000 key hashes per category for drill-down.
 
 The query is in `sql/compare.sql` and is meant to be read. Its header lists every `$placeholder`: tables,
-window, tolerance, column lists and filters, all filled in from the config. `compare.py <config> <month>
---print-sql` prints the filled-in query, ready to paste into `clickhouse-client`.
+window, tolerance, column lists and filters, all filled in from the config. `compare.py <config> <N>
+--print-sql` prints the filled-in query of window N, ready to paste into `clickhouse-client`.
+
+### Windows
+
+A single query over a large month can exceed the server's memory (the GROUP BY holds every key), so the work is
+cut by key, not by time:
+- **Bound columns:** the longest prefix shared by both tables' sorting keys, of configured key columns with the same
+  type on both sides, e.g. `dt, assetRefId, …` for XRP balances and `contractAddress, address, sign` for stacks.
+  Every row of a key then falls in one window, so the results of the windows simply add up.
+- **Bounds** (`sql/bounds.sql`, via `sql/index.sql`): `mergeTreeIndex()` lists the first key of every granule
+  (8192 rows) of both tables in [start, cutoff), on every shard. Ranked by key, they give row-count quantiles of the
+  key, however skewed it is. Only the indexes are read; this takes seconds.
+- **The filter** is written as nested column comparisons (`a > x OR (a = x AND b >= y)`), which the primary index
+  uses. It does not use a tuple comparison `(a, b) >= (x, y)`. Strings are written as `unhex('…')`.
+- The bounds are computed once per config and cached. Stale bounds after merges or new data are still correct, the
+  windows are just less even, so `--force` keeps them. Delete `bounds.json` to recompute them.
+- The windows ignore months: for balances (`dt` leads) a window is a time range; for stacks, a range of contracts
+  and addresses across all months.
 
 Where it runs:
 - **Sharded tables** (`cluster` set in the config): `cluster(..., view(...))` sends the query to one replica of
@@ -48,13 +67,15 @@ is part of the test: a renumbering shows up as `only_old` + `only_new` pairs.
 Run from this directory. `<config>` is a key of `CONFIGS` in `configs.py`.
 
 1. Add a config to `configs.py`: the local tables, cluster, keys, values, start and cutoff.
-2. `python3 compare.py <config> 2024-01`: try one heavy month first and time it.
-3. `nohup python3 compare.py <config> > compare.log 2>&1 &`: run all months, 2 in parallel.
+2. `python3 compare.py <config> 0`: computes the bounds, prints the number of windows and runs window 0. The
+   windows are about equal, so its time times the number of windows, halved for 2 in parallel, estimates the run.
+3. `nohup python3 compare.py <config> > compare.log 2>&1 &`: run all windows, 2 in parallel.
 4. `python3 summary.py <config>`: totals, failing days, samples and the verdict.
-5. `python3 rows.py <config> <day> <hash> ...`: the actual rows behind sample hashes.
+5. `python3 rows.py <config> <day> <hash> ...`: the actual rows behind sample hashes (scans the month of day).
 
-Results are cached per month under `$TCMP_CACHE/<config>/` (default `~/.cache/table-cmp`), so a run resumes where it
-stopped. A change to the config or the SQL templates makes cached months stale, and they are re-run. After the
-table data changes (a backfill progressed, merges), use `--force`.
+The bounds and the results per window are cached under `$TCMP_CACHE/<config>/` (default `~/.cache/table-cmp`), so a
+run resumes where it stopped. A change to the config, the SQL templates or `TCMP_WINDOW_ROWS` makes the bounds
+stale: they are recomputed and every window is re-run. After the table data changes (a backfill progressed,
+merges), use `--force`.
 
 Type check: `mypy --strict *.py`.
