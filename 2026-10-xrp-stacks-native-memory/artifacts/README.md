@@ -5,3 +5,7 @@
 - `jeagent.c`: JVMTI attach agent for jemalloc stats/purge/prof dump inside a live JVM. Build:
   `gcc -O1 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector -fPIC -shared -o jeagent.so jeagent.c`
   (check `objdump -T jeagent.so` needs no GLIBC newer than the target's).
+- `repro/DbOptionsCopyLeak.java`: JNI-only check that an unclosed `DBOptions` copy pins the shared block cache (via the WBM). `javac -cp forstjni-0.1.8.jar`; run `none|leak|closed` with `LD_PRELOAD=libjemalloc.so.2 MALLOC_CONF=dirty_decay_ms:0,muzzy_decay_ms:0`.
+- `repro/ScaleInLeakCheck.java`: MiniCluster job restored alternately at p=2/p=1 from native savepoints; prints RSS after each run. Classpath: `flink-dist-2.3.0.jar` + log4j jars (prepend the patched classes for the fix). Same jemalloc settings, plus `-Xms2g -Xmx2g -XX:+AlwaysPreTouch`.
+- `repro/ForStIncrementalRestoreOperation-close-temp-dboptions.diff`: the fix against release-2.3.0.
+- `repro/scale-in-{stock,patched}.txt`: the two runs' results.

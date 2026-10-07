@@ -1,0 +1,44 @@
+--- a/ForStIncrementalRestoreOperation.java
++++ b/ForStIncrementalRestoreOperation.java
+@@ -975,6 +975,7 @@
+ 
+         return new RestoredDBInstance(
+                 restoreDb,
++                dbOptions,
+                 columnFamilyHandles,
+                 columnFamilyDescriptors,
+                 stateMetaInfoSnapshots,
+@@ -995,6 +996,10 @@
+ 
+         @Nonnull final RocksDB db;
+ 
++        // Native copy made for this temp instance; it holds the shared WriteBufferManager, which
++        // holds the slot-shared block cache, so it must be closed with the instance.
++        @Nonnull final DBOptions dbOptions;
++
+         @Nonnull final ColumnFamilyHandle defaultColumnFamilyHandle;
+ 
+         @Nonnull final List<ColumnFamilyHandle> columnFamilyHandles;
+@@ -1011,12 +1016,14 @@
+ 
+         RestoredDBInstance(
+                 @Nonnull RocksDB db,
++                @Nonnull DBOptions dbOptions,
+                 @Nonnull List<ColumnFamilyHandle> columnFamilyHandles,
+                 @Nonnull List<ColumnFamilyDescriptor> columnFamilyDescriptors,
+                 @Nonnull List<StateMetaInfoSnapshot> stateMetaInfoSnapshots,
+                 @Nonnull IncrementalRemoteKeyedStateHandle srcStateHandle,
+                 @Nonnull String instancePath) {
+             this.db = db;
++            this.dbOptions = dbOptions;
+             this.defaultColumnFamilyHandle = columnFamilyHandles.remove(0);
+             this.columnFamilyHandles = columnFamilyHandles;
+             this.columnFamilyDescriptors = columnFamilyDescriptors;
+@@ -1036,6 +1043,7 @@
+             IOUtils.closeQuietly(defaultColumnFamilyHandle);
+             IOUtils.closeAllQuietly(columnFamilyHandles);
+             IOUtils.closeQuietly(db);
++            IOUtils.closeQuietly(dbOptions);
+             IOUtils.closeAllQuietly(columnFamilyOptions);
+             IOUtils.closeQuietly(readOptions);
+         }

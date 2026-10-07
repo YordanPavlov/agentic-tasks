@@ -1,0 +1,7 @@
+RESULT run=base rss=2151 MiB
+RESULT run=0 p=2 rss=2302 MiB
+RESULT run=1 p=1 rss=2347 MiB
+RESULT run=2 p=2 rss=2367 MiB
+RESULT run=3 p=1 rss=2393 MiB
+RESULT run=4 p=2 rss=2395 MiB
+RESULT run=5 p=1 rss=2409 MiB

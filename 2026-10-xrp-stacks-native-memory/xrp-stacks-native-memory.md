@@ -9,10 +9,12 @@ the cluster doing so; xrp-balances-v6 on the same backend (ForSt + async state) 
 - **A real native leak was found: every job restart on a surviving TM leaks about the block
   cache content of the backends it disposes (high confidence it accumulates; medium-high that
   it's cache content).**
-- **The leak needs ForSt's slot-shared managed cache (medium-high confidence):** with private
-  per-column-family caches (unmanaged memory), a warm-cache restart freed everything. The
-  native holder of the shared cache is not identified yet. Next: source reading and a local
-  MiniCluster repro.
+- **Root cause found and reproduced (high confidence):** ForSt's rescale restore makes a native
+  `DBOptions` copy per temporary DB and never closes it. The copy holds the slot-shared
+  `WriteBufferManager`, which holds the shared block cache, so each scale-in restore pins the
+  restored backend's whole cache past its disposal (section 4). Unfixed on `apache/flink`
+  master (2026-10-07). A 3-line patch fixes it in a local MiniCluster repro. Next: add it to
+  etherbi-flink `flink-patches`, file upstream.
 - **xrp-stacks-v7 currently runs the test config** (unmanaged ForSt memory, jemalloc profiling,
   NMT, `slots: 4`) and needs reverting after the investigation.
 
@@ -99,6 +101,56 @@ logic (pre-grouping, per-block drain), and xrp-stacks-v7 sent nothing to Kafka f
 by setting the source back to 3; the backlog drained (no loss: checkpoint restore,
 exactly-once sink). `cycle.sh` now leaves `Source:` vertices untouched. The autoscaler and the
 job code cap sources at the partition count, so only manual rescales can hit this.
+
+## 4. Root cause: unclosed `DBOptions` copy in the rescale restore
+
+`ForStIncrementalRestoreOperation.restoreTempDBInstance` (release-2.3.0 line 964, unchanged on
+master 8171d96, 2026-10-07):
+
+```java
+DBOptions dbOptions = new DBOptions(this.forstHandle.getDbOptions());  // native copy
+dbOptions.setDbLogDir("");
+RocksDB restoreDb = ForStOperationUtils.openDB(..., dbOptions);       // never closed afterwards
+```
+
+- **What the copy holds:** RocksJava's copy constructor copies the native `DBOptions`,
+  including its reference to the slot-shared `WriteBufferManager`. The WBM in turn holds the
+  shared `LRUCache` (its memtable reservations are charged there).
+- **Why the cache outlives the backend:** when the backend is disposed, the DB, options, WBM and
+  cache *Java handles* are all closed (matching the heap dump), but the leaked copy keeps the
+  native WBM, and so the cache with all its blocks, alive for the life of the JVM.
+- **When it happens:** temp DBs are only used for multi-handle restores (all scale-ins, some
+  scale-outs; `innerRestore`). That explains the alternation in section 2:
+  - restores after p=3 → 1 pinned the new p=1 cache, which leaked in full (~440 MiB) at the
+    next restart;
+  - the p=1 → 3 restores used single handles, so those backends freed everything (+28/+47).
+- **Same-parallelism failovers don't leak.** Neither does unmanaged ForSt memory: there's no
+  WBM, so the leaked copy pins only a few KB (section 3).
+- **Fix:** `RestoredDBInstance` takes the copy and closes it after its DB
+  (`artifacts/repro/ForStIncrementalRestoreOperation-close-temp-dboptions.diff`). Flink's
+  RocksDB backend doesn't have this copy.
+
+**Reproductions** (`artifacts/repro/`, forstjni 0.1.8 = Flink 2.3.0's, jemalloc with decay 0):
+
+- **`DbOptionsCopyLeak.java` (JNI only):** shared `LRUCache` + `WriteBufferManager(cache)` +
+  `DBOptions` with the WBM, cache filled to 308 MiB, then everything closed. Retained:
+  94 MiB with no copy, **422 MiB with an unclosed copy**, 90 MiB with the copy closed.
+- **`ScaleInLeakCheck.java` (MiniCluster, prod's patched flink-dist 2.3.0):** a ForSt
+  async-state job restored alternately at p=2 and p=1 from native savepoints, 1g managed
+  memory, 2 slots. RSS after each run's cluster is gone:
+
+| Run | Stock | Step | Patched | Step |
+|---|---|---|---|---|
+| base | 2,150 | | 2,151 | |
+| 0: p=2 fresh | 2,301 | +151 | 2,302 | +151 |
+| 1: p=1 (scale-in) | 2,733 | **+432** | 2,347 | +45 |
+| 2: p=2 | 2,755 | +22 | 2,367 | +20 |
+| 3: p=1 (scale-in) | 3,167 | **+412** | 2,393 | +26 |
+| 4: p=2 | 3,171 | +4 | 2,395 | +2 |
+| 5: p=1 (scale-in) | 3,591 | **+424** | 2,409 | +14 |
+
+  Stock leaks about one slot's cache per scale-in (+1,290 MiB over 3 cycles). Patched: +107 MiB
+  in total, shrinking (JVM warm-up).
 
 ## Related changes (devops, uncommitted)
 
