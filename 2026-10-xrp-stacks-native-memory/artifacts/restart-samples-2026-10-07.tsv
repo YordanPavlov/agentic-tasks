@@ -1,0 +1,7 @@
+time	label	state	par	rss_mib	heap_mib	native_mib	cache_mib	memt_mib	native_minus_forst_mib
+07:52:22	baseline	RUNNING	1	9775	6171	3556	420	6	3130
+07:53:24	baseline	RUNNING	1	9774	6171	3555	420	6	3129
+08:04:51	after-p3	RUNNING	3	9921	6183	3690	114	0	3576
+08:30:48	after-p1	RUNNING	1	10250	6185	4017	413	0	3604
+08:42:16	after-p3	RUNNING	3	10379	6192	4140	100	0	4040
+09:07:30	after-p1	RUNNING	1	10742	6204	4490	397	6	4087

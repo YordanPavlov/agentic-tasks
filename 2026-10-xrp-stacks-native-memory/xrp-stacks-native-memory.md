@@ -1,104 +1,121 @@
-# xrp-stacks-v7 native memory growth (Hetzner prod)
+# xrp-stacks-v7 native memory (Hetzner prod)
 
-xrp-stacks-v7 TaskManager RSS grows linearly by ~1.9–2.4 GiB/day per TM, with no plateau seen
-over the ~38h observed. It is the only job in the cluster doing so: every other TM grew
-≤0.65 GiB/day, and xrp-balances-v6 (same backend, ForSt + async state) is flat. If this is a
-leak, the 32G pod limit is ~1 week away.
+xrp-stacks-v7 TaskManager RSS grew by ~1.9–2.4 GiB/day per TM (2026-10-04/06), the only job in
+the cluster doing so; xrp-balances-v6 on the same backend (ForSt + async state) was flat.
 
-**Status (2026-10-06):** experiment deployed to tell block-cache fill from a native leak.
-**Revisit on 2026-10-07 (≥24h after 09:36 UTC).**
+**Status (2026-10-07):**
 
-## Experiment (deployed 2026-10-06 09:36 UTC)
+- **The steady daily growth was the block cache filling (high confidence), not a leak.**
+- **A real native leak was found: every job restart on a surviving TM leaks about the block
+  cache content of the backends it disposes (high confidence it accumulates; medium-high that
+  it's cache content).**
+- The owner is not identified yet. The next test (private per-column-family caches instead of
+  the slot-shared one) is prepared in devops but **not deployed**.
 
-devops `hprod/k8s-apps/flink-jobs-operator/xrp/xrp-stacks-v7/values.helm.yaml`, still
-**uncommitted** in devops:
+## 1. Steady growth = block cache filling
 
-- `taskmanager.memory.managed.size: "1536m"`, was ~5.5G. That makes the block cache ~0.5G per
-  slot instead of 1.65G, so it fills within hours. Pod stays `16000m`, limit 32G
-  (`limit-factor: 2`).
-- ForSt metrics: `block-cache-usage`, `block-cache-pinned-usage`, `cur-size-all-mem-tables`,
-  `estimate-table-readers-mem`. These are cheap to keep: one in-memory property read per
-  column family every 5 s.
-- `replicas: 3 → 1` (an unrelated change made in the same deploy) means `parallelism.default`
-  is now 3 on one TM, instead of 9 on 3 TMs. The autoscaler may scale it back up. Absolute
-  RSS is therefore not comparable with the pre-change numbers; compare the slope only.
+The cache was 1.65 GB per slot (`strict_capacity_limit: 0`) against ~3.7 GB of state per subtask,
+so it filled slowly toward 3 × 1.65G per TM. After cutting `taskmanager.memory.managed.size` to
+1536m (~0.5G cache per slot, deployed 2026-10-06 09:36), native memory went flat for 16h+, at
+±40 MiB per hour, even though the autoscaler moved the whole job onto one TM at 13:38.
 
-**Watch native memory, not total RSS.** Pod size is fixed, so shrinking managed memory moved
-4G to the heap (Xmx 5.6G → 9.6G). G1 touches that heap gradually, so `container_memory_rss`
-climbs toward ~13G (9.6G heap + ~3.5G native) for hours even without a leak. Measure anon RSS
-outside the heap range from smaps (see Method notes).
+Ruled out on the way:
 
-- Baseline at 09:51 UTC (+15 min): native anon **2.85 GiB** (≈1.1G direct, ≈1.1G cache,
-  0.2G metaspace, slack), heap resident 5.9G, `block-cache-usage` 350–377 MiB of ~512 MiB per
-  slot, memtables ~0, table readers <1 MiB.
-- Native plateaus at **~3.3–3.6 GiB** once the cache sits at ~0.5G per slot: it was cache fill.
-  Restore the managed size, or keep it smaller if checkpoints and backpressure looked fine.
-- Native keeps climbing at the old ~1.5–2 GiB/day (≥4.5G by 2026-10-07) while the cache is
-  flat: it is a native leak. Next step
-  is jemalloc heap profiling (`jeprof` is already in the image, as done for eth-stacks-v12):
-  `MALLOC_CONF=prof:true,lg_prof_interval:30,prof_prefix:/tmp/jeprof/jeprof` on the TMs, then
-  diff dumps a few hours apart.
+- **Our flink-dist patches:** they only add `close()` calls.
+- **JVM memory:** heap, direct and metaspace are flat.
+- **glibc fragmentation:** jemalloc is preloaded.
+- **ForSt native object handling:** the async read, write and iterate paths and the dispose path
+  close their objects.
+- **Table readers:** index blocks are charged to the cache.
 
-Also watch checkpoint duration and backpressure, since the smaller cache means more S3 reads.
+## 2. Leak on every restart (in-place rescale or failover with surviving TMs)
 
-## What was ruled out (2026-10-06)
+**In-place restart experiment (2026-10-07, one TM, 3 slots, ~0.5G cache per slot):** the job was
+restarted 4 times via the adaptive scheduler's `PUT /jobs/<id>/resource-requirements`, with
+10 min of settling each. "Unexplained" = native anon RSS outside the heap − live ForSt
+`block-cache-usage` − memtables.
 
-- **Our flink-dist patches (high confidence).** All 5 patched classes differ from upstream
-  `release-2.3.0` only by added `close()` calls or try-with-resources; nothing allocates native
-  memory. The only native-touching patch (ReadOptions) is also on xrp-balances-v6, which is
-  flat.
-- **JVM-visible memory.** Heap (Xmx 5.6G, ~150 MB live), direct (~1.1G, the network buffers)
-  and metaspace are flat. smaps shows the growth in anon memory outside the Java heap.
-- **ForSt native object lifecycle.** The async write batch, iterator and map-check paths close
-  their native objects; multiGet is patched. On the disposed backends, the DB, LRUCache,
-  WriteBufferManager, DBOptions and ColumnFamilyOptions are closed.
-- **Table readers.** `cache_index_and_filter_blocks: 1` with a partitioned index and no filter,
-  so index blocks are charged to the block cache.
-- **glibc fragmentation.** jemalloc is `LD_PRELOAD`ed on the TMs.
-- **Stacks-specific code.** Only MapState get/put/remove and an lz4 Kafka sink (the same sink
-  creator as balances); nothing native of our own.
+| Restart | Backends disposed | Their cache when disposed | Unexplained native | Step |
+|---|---|---|---|---|
+| baseline p=1 | – | – | 3,130 MiB | |
+| p=1 → 3 | 1 | full, ~420 MiB | 3,576 MiB | **+446** |
+| p=3 → 1 | 3 | young, ~100–200 MiB | 3,604 MiB | +28 |
+| p=1 → 3 | 1 | full, ~413 MiB | 4,040 MiB | **+436** |
+| p=3 → 1 | 3 | young, ~100–200 MiB | 4,087 MiB | +47 |
 
-## Open points
+- **Each step ≈ the disposed backends' cache content, and nothing comes back.** That's
+  +957 MiB over 4 restarts.
+- **The same pattern explains TM-2-1's ~3G excess** after the 2026-10-04 p=3 → p=9 rescale.
+- **Rough impact:** at the default memory profile (~1.65G cache per slot), a restart could leak
+  up to ~5 GiB per 3-slot TM, so a restart loop of a few attempts can OOMKill a TM.
+- **Deploys don't accumulate it** (fresh submission replaces the pods), nor does a TM pod restart.
 
-- **Leading hypothesis (medium-low confidence): block cache filling slowly.** The cache is
-  1.65 GB per slot, uncapped (`strict_capacity_limit: 0`), against ~3.7 GB of state per
-  subtask (33.5 GB total). TM-2-2 and TM-2-3 were still under the 3 × 1.65G ceiling, and their
-  slope eased from ~0.1 to ~0.065 GiB/h.
-- **TM-2-1 is unexplained.** Its native memory was ~8G against the ~4.9G cache ceiling. It is
-  the TM that ran the p=3 attempt before the 18:10 rescale on 2026-10-04, but those backends'
-  native resources were verified closed.
-- **No ForSt stats in the LOG** (`stats_dump_period_sec: 0`); the metrics above replace them.
+**jemalloc on the live TM** (JVMTI agent, `artifacts/jeagent.c`): allocated 2.76 GiB, resident
+3.16 GiB, **dirty only 34 MiB**. The leaked memory is live allocations, not freed pages that
+jemalloc keeps (jemalloc 5.3.0, `background_thread: false`, 128 arenas).
+
+**Java side of disposed backends (heap dump, TM-2-1):** `RocksDB`, `LRUCache`,
+`WriteBufferManager`, `DBOptions` and `ColumnFamilyOptions` are all closed (`owningHandle_=false`).
+So the native cache is still referenced from the native side.
+
+## Next test (prepared, not deployed)
+
+devops `hprod/.../xrp/xrp-stacks-v7/values.helm.yaml` (uncommitted):
+
+- **`state.backend.forst.memory.managed: "false"` + `state.backend.forst.block.cache-size:
+  "128mb"`.** With no fixed per-slot or per-TM memory, `ForStSharedResourcesFactory.from` returns
+  null, and every column family gets a private cache owned by its table factory instead of the
+  slot-shared `ForStSharedResources` cache.
+  - **No steps across warm-cache restarts:** the leak is in the shared-cache lifecycle (ForSt
+    code), which is what to fix or report upstream.
+  - **Steps remain:** it's in RocksDB/ForSt native teardown, independent of sharing.
+- **Also in the same deploy:**
+  - `MALLOC_CONF=prof:true,lg_prof_sample:20` and `-XX:NativeMemoryTracking=summary`, so a
+    `jeprof --base` diff around one restart can attribute the leaked allocations;
+  - `slots: 4` (from the chart change below).
+- **Procedure:**
+  1. Let the caches fill (~30–40 min).
+  2. Run `PER_CF=1 artifacts/cycle.sh <p> 600`, alternating p=4 → 2 → 4 so every restart
+     disposes warm caches. `PER_CF=1` makes `measure.sh` sum the per-CF caches.
+  3. The autoscaler floor is 4, but its 2h stabilization after each restart leaves room for
+     manual cycles.
+
+## Related changes (devops, uncommitted)
+
+These came out of the investigation: in-place scale-downs inside one pod free no capacity and
+each costs a restart, i.e. a leak event.
+
+- **Chart:**
+  - autoscaled jobs get `job.autoscaler.vertex.min-parallelism = slots`;
+  - rendering fails unless slots divide 128 (the autoscaler rounds up to divisors of the
+    key-group count);
+  - `taskManager.replicas` defaults to 1 for autoscaled jobs (it only sets the starting
+    parallelism in native mode);
+  - `slotmanager.number-of-slots.max` is now required for autoscaled jobs.
+- **The 9 autoscaled values files:** `slots: 3 → 4`, explicit `replicas` removed.
 
 ## Side findings
 
 - **The forst-s3-connection-leak patches are validated in prod** (see
-  `2026-09-forst-s3-connection-leak`). The p=3 → p=9 rescale on 2026-10-04 disposed 3 backends
-  on TM-2-1, and none was held by the DELAYER. All 790 open `CachedDataInputStream`s belonged
-  to live backends, and the leased S3 connections (~330/1024) were SST readers that are open
-  but idle.
-- **New, bounded heap retention:** the Avro-generated `AccountStackHead.READER$` and
-  `StorageSegments.READER$` keep a `SpecificDatumReader.creator` → the old task thread → `Task`
-  → the disposed backend. That's at most one task per Avro class, heap only (native already
-  closed). Not worth fixing.
-- **xrp-balances-v6 is still on image `77f79b53` (unpatched)** and shows the S3 leak signature:
-  857 `CachedDataInputStream` closed over 1147 open `S3AInputStream`, and 143 leased
-  connections all in CLOSE_WAIT with unread data. Its TM has been up since 2026-10-04 18:04.
-  Needs a redeploy on `ca429d16` or later.
+  `2026-09-forst-s3-connection-leak`): after the 2026-10-04 rescale there were no
+  DELAYER-pinned backends and no leaked S3 streams.
+- **Bounded heap-only retention:** Avro `AccountStackHead.READER$` / `StorageSegments.READER$`
+  → `SpecificDatumReader.creator` (the old task thread) → disposed backend. At most one task per
+  Avro class. Not worth fixing.
+- **xrp-balances-v6 still runs `77f79b53` (unpatched)** and has the S3 stream leak signature.
+  Bump to `ca429d16`+.
 
 ## Method notes
 
-- Exec into a TM (pid 1): `jcmd 1 GC.class_histogram`, `jcmd 1 GC.heap_dump -gz=1` (live heap
-  is ~150 MB, so dumps are ~55 MB and take <1 s), `/proc/1/smaps` (heap range vs other anon),
-  `/proc/net/tcp*` (:443 = `01BB`, CLOSE_WAIT = `08`, rx_queue >64B = unread body vs TLS
-  close_notify).
-- Native vs heap RSS: get the heap range from `jcmd 1 GC.heap_info` (the
-  `[0x…, 0x…)` pair), then sum `Rss:` in `/proc/1/smaps` for anonymous mappings outside it.
-- ForSt metrics without Prometheus: JM REST
-  `/jobs/<job>/vertices/<Create stack changes id>/subtasks/<n>/metrics`, ids `*.rocksdb_*`.
-  The cache is shared per slot, so every column family reports the same `block-cache-usage`.
-- Memory history: Prometheus at `monitoring/prometheus-operated:9090` via
-  `kubectl get --raw /api/v1/namespaces/monitoring/services/prometheus-operated:9090/proxy/api/v1/query_range?...`,
-  `container_memory_rss` (about 2 days of retention).
-- ForSt LOG: the largest UUID-named file under
-  `/tmp/tm_*/tmp/<job>/op_*/db/`. The 10g file cache is **per operator**, so ~30G of local disk
-  per 3-slot TM is expected.
+- **Native vs heap RSS:** take the heap range from `jcmd 1 GC.heap_info`, then sum `Rss:` of
+  anonymous mappings in `/proc/1/smaps` outside it (`artifacts/measure.sh`). Prometheus
+  `container_memory_rss` mixes in heap touch-up, so don't use it to judge native growth.
+- **ForSt metrics:** JM REST `/jobs/<job>/vertices/<stack vertex>/subtasks/<n>/metrics`, ids
+  `Create_stack_changes.<cf>.rocksdb_*`. A shared cache reports the same value on every CF.
+- **jemalloc stats in a live JVM:** gdb isn't available and `ptrace_scope=1`, so load
+  `artifacts/jeagent.so` with `jcmd 1 JVMTI.agent_load /tmp/je/jeagent.so "stats:<out>"`.
+  Modes: `stats`, `purge`, `dump` (needs `prof:true`). Built against glibc ≤2.38; the TM has
+  2.39. Copying it into a prod pod needs a manual step (the auto-mode classifier blocks it).
+- **Heap dumps:** `jcmd 1 GC.heap_dump -gz=1` (~55 MB, <1 s).
+- **ForSt LOG:** the largest UUID-named file in `/tmp/tm_*/tmp/<job>/op_*/db/`. It has no stats
+  (`stats_dump_period_sec: 0`). The 10g file cache is per operator.
