@@ -28,7 +28,7 @@ PY
 # job state, parallelism, and ForSt cache + memtables (MiB, summed over subtasks). With
 # PER_CF=1 (unmanaged ForSt memory) every column family has its own cache, so all are summed;
 # otherwise they share one per-slot cache and report the same value.
-read -r STATE PAR CACHE MEMT < <($K exec -i -c flink-main-container "$JM" -- python3 - "${PER_CF:-0}" <<'PY'
+read -r STATE PAR CACHE MEMT TREAD < <($K exec -i -c flink-main-container "$JM" -- python3 - "${PER_CF:-0}" <<'PY'
 import json, sys, urllib.request
 CFS = ('account-head', 'account-change-store', 'block-buffer', 'drained-watermark')
 cache_cfs = CFS if sys.argv[1] == '1' else CFS[:1]
@@ -36,20 +36,22 @@ get = lambda p: json.load(urllib.request.urlopen('http://localhost:8081' + p))
 job = next(j for j in get('/jobs')['jobs'] if j['status'] in ('RUNNING', 'RESTARTING', 'CREATED'))
 d = get('/jobs/' + job['id'])
 v = next(v for v in d['vertices'] if 'stack' in v['name'])
-cache = memt = 0
+cache = memt = tread = 0
 for s in range(v['parallelism']):
     ids = ','.join([f'Create_stack_changes.{cf}.rocksdb_block-cache-usage' for cf in cache_cfs]
-                   + [f'Create_stack_changes.{cf}.rocksdb_cur-size-all-mem-tables' for cf in CFS])
+                   + [f'Create_stack_changes.{cf}.rocksdb_cur-size-all-mem-tables' for cf in CFS]
+                   + [f'Create_stack_changes.{cf}.rocksdb_estimate-table-readers-mem' for cf in CFS])
     for m in get(f"/jobs/{job['id']}/vertices/{v['id']}/subtasks/{s}/metrics?get={ids}"):
         val = int(float(m['value'])) // 2**20
         if 'block-cache-usage' in m['id']: cache += val
+        elif 'table-readers' in m['id']: tread += val
         else: memt += val
-print(d['state'], v['parallelism'], cache, memt)
+print(d['state'], v['parallelism'], cache, memt, tread)
 PY
 )
 
-UNEXPLAINED=$((NATIVE - CACHE - MEMT))
-[ -s "$OUT" ] || printf 'time\tlabel\tstate\tpar\trss_mib\theap_mib\tnative_mib\tcache_mib\tmemt_mib\tnative_minus_forst_mib\n' > "$OUT"
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%H:%M:%S)" "$LABEL" "$STATE" "$PAR" \
-  "$RSS" "$HEAP" "$NATIVE" "$CACHE" "$MEMT" "$UNEXPLAINED" >> "$OUT"
+UNEXPLAINED=$((NATIVE - CACHE - MEMT - TREAD))
+[ -s "$OUT" ] || printf 'time\tlabel\tstate\tpar\trss_mib\theap_mib\tnative_mib\tcache_mib\tmemt_mib\tnative_minus_forst_mib\ttable_readers_mib\n' > "$OUT"
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u +%H:%M:%S)" "$LABEL" "$STATE" "$PAR" \
+  "$RSS" "$HEAP" "$NATIVE" "$CACHE" "$MEMT" "$UNEXPLAINED" "$TREAD" >> "$OUT"
 tail -1 "$OUT"

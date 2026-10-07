@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One in-place restart of xrp-stacks-v7: set every vertex's parallelism to $1 via the
-# adaptive scheduler's resource-requirements API, wait until all tasks run, settle, measure.
+# adaptive scheduler's resource-requirements API (sources excluded), wait until all tasks run, settle, measure.
 set -euo pipefail
 P=${1:?parallelism}; SETTLE=${2:-600}
 D=$(cd "$(dirname "$0")" && pwd)
@@ -13,7 +13,12 @@ p = int(sys.argv[1])
 base = 'http://localhost:8081'
 job = next(j for j in json.load(urllib.request.urlopen(base + '/jobs'))['jobs'] if j['status'] == 'RUNNING')['id']
 req = json.load(urllib.request.urlopen(f'{base}/jobs/{job}/resource-requirements'))
-body = {v: {'parallelism': {'lowerBound': 1, 'upperBound': p}} for v in req}
+# Sources stay as they are: their parallelism is the partition count, and a split-less source
+# subtask pins the watermark at Long.MIN_VALUE, stalling all event-time logic downstream.
+sources = {v['id'] for v in json.load(urllib.request.urlopen(f'{base}/jobs/{job}'))['vertices']
+           if v['name'].startswith('Source:')}
+body = {v: (r if v in sources else {'parallelism': {'lowerBound': 1, 'upperBound': p}})
+        for v, r in req.items()}
 r = urllib.request.Request(f'{base}/jobs/{job}/resource-requirements', data=json.dumps(body).encode(),
                            method='PUT', headers={'Content-Type': 'application/json'})
 print('PUT', urllib.request.urlopen(r).status, body)

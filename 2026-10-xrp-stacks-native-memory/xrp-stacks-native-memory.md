@@ -9,8 +9,12 @@ the cluster doing so; xrp-balances-v6 on the same backend (ForSt + async state) 
 - **A real native leak was found: every job restart on a surviving TM leaks about the block
   cache content of the backends it disposes (high confidence it accumulates; medium-high that
   it's cache content).**
-- The owner is not identified yet. The next test (private per-column-family caches instead of
-  the slot-shared one) is prepared in devops but **not deployed**.
+- **The leak needs ForSt's slot-shared managed cache (medium-high confidence):** with private
+  per-column-family caches (unmanaged memory), a warm-cache restart freed everything. The
+  native holder of the shared cache is not identified yet. Next: source reading and a local
+  MiniCluster repro.
+- **xrp-stacks-v7 currently runs the test config** (unmanaged ForSt memory, jemalloc profiling,
+  NMT, `slots: 4`) and needs reverting after the investigation.
 
 ## 1. Steady growth = block cache filling
 
@@ -58,27 +62,43 @@ jemalloc keeps (jemalloc 5.3.0, `background_thread: false`, 128 arenas).
 `WriteBufferManager`, `DBOptions` and `ColumnFamilyOptions` are all closed (`owningHandle_=false`).
 So the native cache is still referenced from the native side.
 
-## Next test (prepared, not deployed)
+## 3. Private per-column-family caches don't leak (2026-10-07)
 
-devops `hprod/.../xrp/xrp-stacks-v7/values.helm.yaml` (uncommitted):
+**Deployed 2026-10-07 09:43 UTC** (devops values, uncommitted):
 
-- **`state.backend.forst.memory.managed: "false"` + `state.backend.forst.block.cache-size:
-  "128mb"`.** With no fixed per-slot or per-TM memory, `ForStSharedResourcesFactory.from` returns
-  null, and every column family gets a private cache owned by its table factory instead of the
-  slot-shared `ForStSharedResources` cache.
-  - **No steps across warm-cache restarts:** the leak is in the shared-cache lifecycle (ForSt
-    code), which is what to fix or report upstream.
-  - **Steps remain:** it's in RocksDB/ForSt native teardown, independent of sharing.
-- **Also in the same deploy:**
-  - `MALLOC_CONF=prof:true,lg_prof_sample:20` and `-XX:NativeMemoryTracking=summary`, so a
-    `jeprof --base` diff around one restart can attribute the leaked allocations;
-  - `slots: 4` (from the chart change below).
-- **Procedure:**
-  1. Let the caches fill (~30–40 min).
-  2. Run `PER_CF=1 artifacts/cycle.sh <p> 600`, alternating p=4 → 2 → 4 so every restart
-     disposes warm caches. `PER_CF=1` makes `measure.sh` sum the per-CF caches.
-  3. The autoscaler floor is 4, but its 2h stabilization after each restart leaves room for
-     manual cycles.
+- **`state.backend.forst.memory.managed: "false"` + `block.cache-size: "128mb"`.** With no
+  fixed per-slot or per-TM memory, `ForStSharedResourcesFactory.from` returns null, so each
+  column family gets a private cache owned by its table factory.
+- **Also in the deploy:** `MALLOC_CONF=prof:true,lg_prof_sample:20`,
+  `-XX:NativeMemoryTracking=summary`, `slots: 4`.
+- **Side effect of unmanaged memory:** the partitioned-index-in-cache setup only happens on the
+  shared-resources path. Without it, each table reader loads its full index
+  (`BinarySearchIndexReader`) outside the cache (~170–200 MiB here, the
+  `estimate-table-readers-mem` metric), which `measure.sh` now subtracts too.
+
+| | Live cache | Memtables | Table readers | Native minus all ForSt |
+|---|---|---|---|---|
+| before p=2 → 4 (11:24 UTC) | 114 MiB | 13 MiB | 168 MiB | 1,891 MiB |
+| after (11:37 UTC) | 0 | 0 | 197 MiB | 1,892 MiB, **+1** |
+
+- **Two warm backends (~295 MiB of ForSt memory) were disposed and all of it was freed.** Under
+  the shared cache, the same restart left ~440 MiB behind. So the native holder is in the
+  slot-shared path (`SLOT_SHARED_MANAGED` → `ForStSharedResources`), not in ForSt/RocksDB
+  instance teardown. One clean data point.
+- **The earlier p=4 → 2 "+187 MiB" was an artifact:** table-reader memory wasn't measured yet.
+- **jemalloc profiling works:** `before.heap` symbolizes locally (see Method notes).
+  - ForSt's live native memory is mostly `RetrieveBlock → UncompressBlockData` (cache blocks),
+    `TableCache::GetTableReader → BinarySearchIndexReader::Create` (index blocks), and
+    compaction/flush buffers.
+  - The JVM's own `os::malloc` (~1.3G) is mostly direct network buffers.
+
+**Incident caused by the experiment (2026-10-07 11:25–13:50 UTC):** `cycle.sh` set *all*
+vertices, sources included, to p=4. The source topics have 3 partitions, so source subtask 3
+had no split, and its watermark stayed at `Long.MIN_VALUE`. That held back all event-time
+logic (pre-grouping, per-block drain), and xrp-stacks-v7 sent nothing to Kafka for ~2.5h. Fixed
+by setting the source back to 3; the backlog drained (no loss: checkpoint restore,
+exactly-once sink). `cycle.sh` now leaves `Source:` vertices untouched. The autoscaler and the
+job code cap sources at the partition count, so only manual rescales can hit this.
 
 ## Related changes (devops, uncommitted)
 
@@ -117,5 +137,12 @@ each costs a restart, i.e. a leak event.
   Modes: `stats`, `purge`, `dump` (needs `prof:true`). Built against glibc ≤2.38; the TM has
   2.39. Copying it into a prod pod needs a manual step (the auto-mode classifier blocks it).
 - **Heap dumps:** `jcmd 1 GC.heap_dump -gz=1` (~55 MB, <1 s).
+- **jeprof symbols:** the TM image has `jeprof` but no binutils. Copy the `.heap` file,
+  `/usr/bin/jeprof`, and the libraries listed in the profile (`libjvm.so`,
+  `libforstjni-linux64.so` from `/tmp/tm_*/tmp/rocksdb-lib-*/`, libc, libstdc++, libjemalloc,
+  `bin/java`) into a local dir mirroring their paths, then run
+  `perl jeprof --lib_prefix=<dir> --text --cum --show_bytes <dir>/opt/java/openjdk/bin/java x.heap`.
+  The `operator delete[]` line is really `operator new[]`: jeprof attributes a return address
+  to the nearest symbol.
 - **ForSt LOG:** the largest UUID-named file in `/tmp/tm_*/tmp/<job>/op_*/db/`. It has no stats
   (`stats_dump_period_sec: 0`). The 10g file cache is per operator.
