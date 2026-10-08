@@ -1,8 +1,9 @@
 # Comparing an old and a new version of a table (runbook)
 
 **Started:** 2026-09-30
-**Status:** Single-pass, per-month comparison (`scripts/`), in place since 2026-10-02. Validated on XRP balances
-and stacks months; no full run with the new scripts yet (see "Runs").
+**Status:** Key-range windows over the whole history (`scripts/`, described in `scripts/README.md`); first full
+`xrp_stacks` run done 2026-10-07 (see "Runs"). A redesign of the output is agreed and not yet implemented (see
+"Plan: per-month output").
 **Origin:** [`2026-09-rerun-comparison-framework`](../2026-09-rerun-comparison-framework/rerun-comparison-framework.md)
 has the development history and the first XRP balances results.
 
@@ -104,6 +105,40 @@ Plain Python 3.11 plus `clickhouse-client`. The code is typed (`mypy --strict *.
 - `where`, `where_old`, `where_new`: optional filters, e.g. to limit old to the metrics the experimental table
   holds.
 
+## Plan: per-month output (agreed 2026-10-08)
+
+Why: the full stacks run left a 36 GB cache (99% `soft_diff` key hashes), `summary.py` ran out of memory on it,
+and results spread over key ranges can't be read in time order. Goal: small, readable results, ordered by date
+from chain start.
+
+- **Windows = (month, key range), run in date order.** Each month is final once its windows finish. Months
+  are partitions, so each granule is still read about once. Estimated for stacks: 422 windows (1 for most
+  early months, 13 for 2024-01), about 280 min of query time, ≈ 2.5 h wall at `--parallel 2`; the fixed cost
+  per query is ~2 s.
+- **Buckets from exact counts, replacing `mergeTreeIndex` bounds.** Per month, run `count() FINAL` (with the
+  config filters) `GROUP BY` the bucket columns (a config field: `contractAddress, address, sign` for stacks).
+  Contiguous ranges are cut in Python; a contract that is too large is split by address, then by `sign`. XRP is
+  62% of stacks in 2025-03. The count costs ~1–10 s per month.
+- **Check:** per month, Σ `old_rows`/`new_rows` of the windows must equal the `FINAL` counts above; a
+  mismatch fails the month.
+- **Output:** `results/<config>/YYYY/YYYY-MM.json` in this directory, one entry per window, keyed by window
+  number. The fingerprint (for staleness and resume) sits in the file header; operators ignore it. Workers only
+  run queries; the main thread writes the files.
+- **No key hashes and no shard column.** The `cluster(view())` wrapper stays (each shard compares its own
+  tables), and shards are summed in SQL.
+- **Per window, per (day, category):** keys, old/new rows, the number of keys differing in each column
+  (`value_diff`, `float_diff`, `soft_diff`), and the largest relative float difference. **Per category,
+  one example key:** the key columns plus the raw columns (e.g. `nonce`, `dt`), old and new values, the
+  columns that differ; for `float_diff`, the largest difference. With these the operator can query the
+  tables directly, so `rows.py` goes.
+- **`summary.py`:** totals per month only (no windows, no keys). It opens with the first failing month. An HTML
+  page comes later: daily stacked bars per category, log scale, zoom, a year → month → day table.
+- **To measure on the trial month (2024-01):** window speed, and the memory cost of per-column hashes (~15%
+  estimated); lower the window size if needed.
+- Lost: the cross-shard moved-keys check. The sharding assumption goes into the README.
+- Timing note: a one-day comparison takes 43–96 s, because stacks aren't sorted by `dt` and a day reads
+  its whole month.
+
 ## Procedure
 
 1. **Check that the new table is completely written.** Per side, look at `max(dt)`, the unmerged parts and the
@@ -200,6 +235,7 @@ Not checked: months skipped, invariants not run, open questions (e.g. backfill e
 | 2026-09-30 | `xrp_balances` | tier scripts | new ⊇ old, equal within 1e-9 (Tier 1 97 min, Tier 2 28 min); details in the origin doc |
 | 2026-09-30 | `xrp_stacks`, probe | tier scripts | no keys lost; `nonce` renumbered; holdings and ages equal |
 | 2026-10-02 | `xrp_balances` 2013-01..02, `xrp_stacks` 2013-02..03 and 2024-01 | current | validation of the new scripts, below |
+| 2026-10-07 | `xrp_stacks` 2013-01 .. 2026-09-03, full | key-range windows (314) | DIFFERS, below |
 
 **Validation, 2026-10-02:**
 - Key and row counts match `uniqExact` / `count()` on the Distributed tables exactly (stacks 2013-03, balances
@@ -218,9 +254,16 @@ Not checked: months skipped, invariants not run, open questions (e.g. backfill e
 - Side finding (2026-09-30): 2013 stack rows with `sign = 1` have `odt = 1970-01-01` on both sides.
 - Cache of these runs: `~/.cache/table-cmp-v2/`.
 
+**`xrp_stacks` full run, 2026-10-07:** 274 min query time. 8.41B keys per side (new +143k).
+- `only_old` 10,200, `only_new` 153,310 (none moved between shards), `value_diff` 4.0M, `float_diff` 9.3M,
+  `soft_diff` 1.13B (`nonce` offset only), `equal` 7.26B.
+- 443 failing days. 2026-05-31 alone has 2.43M `value_diff`; mid-June to mid-August 2025 is mostly
+  `float_diff`, with `only_new` spikes on 2025-06-17 and 2025-06-26.
+- The cache was deleted on 2026-10-08; the redesign makes this run obsolete.
+
 ## Open
 
-- Full runs of `xrp_balances` and `xrp_stacks` with the new scripts.
-- Stacks: explain the `nonce` renumbering, the 96k `value_diff` and the 1,660 `old_multi` with `rows.py`.
-- A drill-down aid that marks `only_old`/`only_new` pairs differing only in `nonce`.
+- Implement "Plan: per-month output", trial on stacks 2024-01, then a full stacks run.
+- Full `xrp_balances` run.
+- Stacks: explain the 2026-05-31 `value_diff`s and the 2025-06..08 `float_diff`s.
 - Script the invariants, starting with the balance chain.
