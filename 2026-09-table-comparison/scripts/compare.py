@@ -11,6 +11,7 @@ usage: compare.py <config> [N ...] [--parallel N] [--force] [--print-sql]
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -37,11 +38,12 @@ def run_window(config_name: str, config: Config, bounds: Bounds, window: Window)
 
 
 def report(window: Window, result: WindowResult) -> str:
-    """One line per window: time, keys and the categories that are not OK."""
+    """One line per window: time, keys, the categories that are not OK, and soft_diff, which passes but is worth
+    seeing."""
     total_keys = sum(row['keys'] for row in result['rows'])
     differing: dict[str, int] = {}
     for row in result['rows']:
-        if row['category'] not in OK_CATEGORIES:
+        if row['category'] not in OK_CATEGORIES or row['category'] == 'soft_diff':
             differing[row['category']] = differing.get(row['category'], 0) + row['keys']
     differences = ', '.join(f'{category}={keys:,}' for category, keys in sorted(differing.items()))
     return (f'{window.name}  {result["elapsed_s"]:>7.1f} s  {total_keys:>13,} keys  '
@@ -76,14 +78,21 @@ def main() -> None:
         todo = [window for window in todo if load_result(args.config, bounds, window) is None]
     print(f'{len(todo)} of {len(windows(bounds))} window(s) to run', file=sys.stderr)
 
-    with ThreadPoolExecutor(max_workers=args.parallel) as pool:
-        futures = [(window, pool.submit(run_window, args.config, config, bounds, window)) for window in todo]
+    pool = ThreadPoolExecutor(max_workers=args.parallel)
+    futures = [(window, pool.submit(run_window, args.config, config, bounds, window)) for window in todo]
+    try:
         for window, future in futures:
             try:
                 print(report(window, future.result()), flush=True)
             except RuntimeError as error:
                 # a failed window is left uncached and retried on the next run
                 print(f'{window.name}  FAILED: {error}', file=sys.stderr, flush=True)
+    except KeyboardInterrupt:
+        # Ctrl+C also reached the running clickhouse-clients; os._exit skips the join on the worker threads
+        pool.shutdown(wait=False, cancel_futures=True)
+        print('interrupted; finished windows are cached', file=sys.stderr, flush=True)
+        os._exit(130)
+    pool.shutdown()
 
 
 if __name__ == '__main__':

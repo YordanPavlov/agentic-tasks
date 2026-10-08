@@ -40,8 +40,16 @@ Where it runs:
   reported as moved, not lost.
 - **Fully replicated tables** (`cluster=None`): the query runs on the broker the connection lands on.
 
-Both sides are read with `FINAL`, i.e. as consumers see them: for each sorting key, the latest inserted row (or the
-highest version). Unmerged copies are not differences.
+### Sources
+
+Each side is read through a **source** (`sql/sources/`, `source` in the config), the innermost query of
+`compare.sql` and `rows.sql`. The default, `plain.sql`, reads the table with `FINAL`, i.e. as consumers see it: for
+each sorting key, the latest inserted row (or the highest version). Unmerged copies are not differences.
+
+A table-specific source may derive columns that the config then uses as keys or values, e.g. `xrp_stacks.sql` ranks
+`nonce` within its block, so that a renumbering is not a difference. A source must apply `$key_range` to the window
+columns as they are in the table and keep all rows of a key in one window. Column types come from `DESCRIBE` of
+the source.
 
 ### Categories
 
@@ -49,13 +57,15 @@ highest version). Unmerged copies are not differences.
 |---|---|
 | `equal` | identical |
 | `float_noise` | floats differ by at most 1e-9 relative; everything else is identical |
+| `soft_diff` | only a soft value (`soft_values` in the config) differs; passes, but compare.py and summary.py show it |
 | `old_multi` / `new_multi` | after `FINAL`, that side still has several different rows for the key: the configured key is coarser than the table's sorting key |
 | `value_diff` | one row on each side, and a non-float value differs |
 | `float_diff` | one row on each side, and a float differs by more than 1e-9 relative |
 | `only_old` / `only_new` | the key exists on one side only |
 
 The keys are compared exactly as configured. A key column that the pipeline computes, such as `nonce` in stacks,
-is part of the test: a renumbering shows up as `only_old` + `only_new` pairs.
+is part of the test, and a renumbering shows up as `only_old` + `only_new` pairs, unless a source derives an
+offset-free key from it and the raw column is a soft value.
 
 ## Prerequisites
 
@@ -71,7 +81,8 @@ Run from this directory. `<config>` is a key of `CONFIGS` in `configs.py`.
    windows are about equal, so its time times the number of windows, halved for 2 in parallel, estimates the run.
 3. `nohup python3 compare.py <config> > compare.log 2>&1 &`: run all windows, 2 in parallel.
 4. `python3 summary.py <config>`: totals, failing days, samples and the verdict.
-5. `python3 rows.py <config> <day> <hash> ...`: the actual rows behind sample hashes (scans the month of day).
+5. `python3 rows.py <config> <day> --window N <hash> ...`: the actual rows behind sample hashes, as the source
+   returns them (scans the month of day within window N); summary.py prints these commands.
 
 The bounds and the results per window are cached under `$TCMP_CACHE/<config>/` (default `~/.cache/table-cmp`), so a
 run resumes where it stopped. A change to the config, the SQL templates or `TCMP_WINDOW_ROWS` makes the bounds

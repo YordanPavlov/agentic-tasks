@@ -32,7 +32,7 @@ LOG_COMMENT = json.dumps({'job': 'table-compare', 'owner': 'yordan.p@santiment.n
                           'repo': 'clickhouse-tables', 'dag': 'manual-tests'})
 
 # Categories that mean "no difference"; everything else needs explaining.
-OK_CATEGORIES = ('equal', 'float_noise')
+OK_CATEGORIES = ('equal', 'float_noise', 'soft_diff')
 # Network errors (209 timeout, 210 connection refused, 32 unexpected EOF) are retried; anything else is final.
 RETRYABLE_ERROR_CODES = {'32', '209', '210'}
 
@@ -44,7 +44,10 @@ def run_query(sql: str, output_format: str = 'TSV', timeout_s: int = 1800) -> st
     because --format overrides a FORMAT clause anyway."""
     command = ['clickhouse-client', '-h', HOST, '--port', PORT, '-u', USER, f'--log_comment={LOG_COMMENT}',
                f'--max_execution_time={timeout_s}', '--output_format_json_quote_64bit_integers=0',
-               f'--format={output_format}', '--query', sql]
+               f'--format={output_format}',
+               # sources select *, which would leave out MATERIALIZED and ALIAS columns
+               '--asterisk_include_materialized_columns=1', '--asterisk_include_alias_columns=1',
+               '--query', sql]
     for attempt in range(3):
         process = subprocess.run(command, capture_output=True, text=True)
         if process.returncode == 0:
@@ -98,26 +101,26 @@ def strip_type(type_name: str) -> tuple[str, bool]:
             return type_name, nullable
 
 
-def table_types(table: str) -> dict[str, str]:
-    """Column name -> type of a 'db.table'."""
-    database, name = table.split('.', 1)
-    output = run_query(f"SELECT name, type FROM system.columns WHERE database = '{database}' AND table = '{name}'")
-    return dict(line.split('\t') for line in output.splitlines())
+def source_types(config: Config, side: str) -> dict[str, str]:
+    """Column name -> type of what one side's source returns; it runs on the connected host, which needs the
+    local tables."""
+    sql = f'DESCRIBE (\n{source_sql(config, side, config.start, config.start, "0")}\n)'
+    return dict(line.split('\t')[:2] for line in run_query(sql).splitlines())
 
 
 @lru_cache(maxsize=None)  # one metadata lookup per config and process
-def columns(config: Config) -> tuple[list[Column], list[Column]]:
-    """(key columns, value columns) with types from both tables; fails if a listed column is missing."""
-    old_types, new_types = table_types(config.old), table_types(config.new)
-    if not old_types or not new_types:
-        raise RuntimeError(f'table not found: {config.old if not old_types else config.new}')
-    missing = [name for name in config.keys + config.values if name not in old_types or name not in new_types]
+def columns(config: Config) -> tuple[list[Column], list[Column], list[Column]]:
+    """(key, value, soft-value columns) with types from both sources; fails if a listed column is missing."""
+    old_types, new_types = source_types(config, 'old'), source_types(config, 'new')
+    names = config.keys + config.values + config.soft_values
+    missing = [name for name in names if name not in old_types or name not in new_types]
     if missing:
         raise RuntimeError(f'columns missing on one side: {missing}')
 
     def column(name: str) -> Column:
         return Column(name, old_types[name], new_types[name])
-    return [column(name) for name in config.keys], [column(name) for name in config.values]
+    return ([column(name) for name in config.keys], [column(name) for name in config.values],
+            [column(name) for name in config.soft_values])
 
 
 # ---------- SQL generation ----------
@@ -142,19 +145,29 @@ def float_value(column: Column) -> str:
     return f'toFloat64(ifNull({column.name}, 0))' if column.nullable else f'toFloat64({column.name})'
 
 
-def placeholders(config: Config, start: str, end: str) -> dict[str, str]:
-    """The $placeholders shared by the templates: tables, time range, column lists and the config's filters."""
-    keys, values = columns(config)
+def source_sql(config: Config, side: str, start: str, end: str, key_range: str) -> str:
+    """The rows of one side ('old' or 'new') in [start, end) and the key range, from the config's source."""
+    table, where = (config.old, config.where_old) if side == 'old' else (config.new, config.where_new)
+    return Template((SQL_DIR / 'sources' / config.source).read_text()).substitute(
+        table=table, dt=config.dt, start=start, end=end, key_range=key_range,
+        where=f'({config.where}) AND ({where})')
+
+
+def placeholders(config: Config, start: str, end: str, key_range: str) -> dict[str, str]:
+    """The $placeholders shared by the templates: the sources, column lists and the partition column."""
+    keys, values, soft_values = columns(config)
     floats = [column for column in values if column.is_float]
     exact = [hash_args(column) for column in values if not column.is_float]
     exact += [f'isNull({column.name})' for column in floats if column.nullable]
     return dict(
-        old_table=config.old, new_table=config.new, dt=config.dt, start=start, end=end,
+        old_source=source_sql(config, 'old', start, end, key_range),
+        new_source=source_sql(config, 'new', start, end, key_range),
+        dt=config.dt,
         key_columns=', '.join(hash_args(column) for column in keys),
         exact_value_columns=', '.join(exact) or '0',
         float_value_columns=', '.join(float_value(column) for column in floats),
-        columns=', '.join(column.name for column in keys + values),
-        where=config.where, where_old=config.where_old, where_new=config.where_new)
+        soft_value_columns=', '.join(hash_args(column) for column in soft_values) or '0',
+        columns=', '.join(column.name for column in keys + values + soft_values))
 
 
 def from_template(file_name: str, config: Config, values: dict[str, str]) -> str:
@@ -169,18 +182,19 @@ def from_template(file_name: str, config: Config, values: dict[str, str]) -> str
 
 def compare_sql(config: Config, window: Window) -> str:
     return from_template('compare.sql', config, {
-        **placeholders(config, config.start, config.cutoff), 'key_range': window.key_range,
+        **placeholders(config, config.start, config.cutoff, window.key_range),
         'tolerance': repr(FLOAT_TOLERANCE), 'max_key_hashes': str(MAX_KEY_HASHES)})
 
 
-def rows_sql(config: Config, day: str, key_hashes: list[str]) -> str:
+def rows_sql(config: Config, day: str, key_hashes: list[str], key_range: str = '1') -> str:
     """The rows of the given key hashes in the calendar month of day: a key whose day differs between old and new
-    usually still has both versions in that month."""
+    usually still has both versions in that month. key_range, the hash's window, keeps a ranking source cheap."""
     month_start = datetime.date.fromisoformat(day).replace(day=1)
     month_end = (month_start + datetime.timedelta(days=32)).replace(day=1)
     start, end = max(str(month_start), config.start), min(str(month_end), config.cutoff)
     quoted_hashes = ', '.join(f"'{key_hash}'" for key_hash in key_hashes)
-    sql = from_template('rows.sql', config, {**placeholders(config, start, end), 'key_hashes': quoted_hashes})
+    sql = from_template('rows.sql', config, {**placeholders(config, start, end, key_range),
+                                            'key_hashes': quoted_hashes})
     return sql + '\nORDER BY key_hash, side, host'
 
 
@@ -302,7 +316,7 @@ def fingerprint(config: Config) -> str:
     """Changes whenever the config, the SQL templates or the constants change; cached bounds with another
     fingerprint are stale, and so are the results computed with them."""
     digest = hashlib.sha256(repr((config, FLOAT_TOLERANCE, MAX_KEY_HASHES, WINDOW_ROWS)).encode())
-    for path in sorted(SQL_DIR.glob('*.sql')):
+    for path in sorted(SQL_DIR.rglob('*.sql')):
         digest.update(path.read_bytes())
     return digest.hexdigest()[:16]
 
