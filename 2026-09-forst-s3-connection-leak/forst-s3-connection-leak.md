@@ -26,7 +26,7 @@ xrp-stacks-v7. Waiting to see it through a restart/rescale before calling it val
 
 **Bug A — S3 streams never closed (exhausts the pool).** Upstream
 [FLINK-40644](https://issues.apache.org/jira/browse/FLINK-40644), PR
-[#29168](https://github.com/apache/flink/pull/29168), open and unmerged.
+[#29168](https://github.com/apache/flink/pull/29168), merged to master 2026-10-06 (fix version 2.4.0).
 `CachedDataInputStream.close()` closes only the local cache stream, never `originalStream`
 (the remote S3 stream), so every S3 stream read through the ForSt file cache keeps an HTTP
 connection leased forever. `fs.s3a.connection.maximum` (1024) is a TM-wide pool that survives
@@ -35,7 +35,7 @@ job restarts, so the leak accumulates on long-lived TMs. The PR also closes the 
 
 **Bug A2 — closed streams pile up on the heap.** Upstream
 [FLINK-40645](https://issues.apache.org/jira/browse/FLINK-40645), PR
-[#29169](https://github.com/apache/flink/pull/29169), open and unmerged. Closed
+[#29169](https://github.com/apache/flink/pull/29169), merged to master 2026-10-07 (fix version 2.4.0). Closed
 `CachedDataInputStream`s stay in `FileCacheEntry.openedStreams` until the file is evicted. Our
 heap dump's retention chain goes through it.
 
@@ -50,8 +50,10 @@ close the controller in `close()` of `AbstractAsyncKeyOrderedStreamOperator` and
 was not needed to explain the connection leak (the pool doesn't reclaim on GC), only kept the
 leaked streams visible in the dump.
 
-Our patched code is identical to the two upstream PRs applied to release-2.3.0 (comments
-differ). All files are still unchanged on apache/flink master as of 2026-10-01. Details and
+Our patched code behaves the same as the two merged upstream PRs applied to release-2.3.0
+(comments differ; upstream's A2 goes through a new `FileCacheEntry.unregisterStream()` helper).
+Neither is backported to `release-2.3` (2026-10-08), so the patches stay until the bump to 2.4.0.
+The Bug B files are still unchanged on apache/flink master. Details and
 safety arguments are in etherbi-flink `flink-patches/README.md`.
 
 ## Exposure and conditions
