@@ -4,7 +4,6 @@ the periods and windows, and the result files. README.md describes the method.
 from __future__ import annotations
 
 import datetime
-import hashlib
 import json
 import os
 import re
@@ -23,6 +22,8 @@ PORT = os.environ.get('TCMP_PORT', '30900')
 USER = os.environ.get('TCMP_USER', 'readonly')
 RESULTS_DIR = Path(os.environ.get('TCMP_RESULTS', Path(__file__).parent / 'results'))
 SQL_DIR = Path(__file__).parent / 'sql'
+# Read once, so that a run uses one version of the SQL even if the files change while it runs.
+TEMPLATES = {path.relative_to(SQL_DIR).as_posix(): Template(path.read_text()) for path in SQL_DIR.rglob('*.sql')}
 
 FLOAT_TOLERANCE = 1e-9  # relative
 # Rows per shard and window, both sides together. A window query holds all of its keys in memory.
@@ -111,27 +112,29 @@ def side_where(config: Config, side: str, common_groups: bool = True) -> str:
     """The filters of one side ('old' or 'new'); with common_groups_only, also its groups present on the other."""
     where, other_table, other_where = ((config.where_old, config.new, config.where_new) if side == 'old'
                                        else (config.where_new, config.old, config.where_old))
-    result = f'({config.where}) AND ({where})'
+    filters = [f'({condition})' for condition in (config.where, where) if condition != '1']
     if config.common_groups_only and common_groups:
         groups = ', '.join(config.group_by)
-        result += (f' AND ({groups}) IN (SELECT DISTINCT {groups} FROM {other_table}'
-                   f" WHERE {config.dt} >= '{config.start}' AND {config.dt} < '{config.cutoff}'"
-                   f' AND ({config.where}) AND ({other_where}))')
-    return result
+        other_filters = ''.join(f' AND ({condition})' for condition in (config.where, other_where) if condition != '1')
+        filters.append(f'({groups}) IN (SELECT DISTINCT {groups} FROM {other_table}'
+                       f" WHERE {config.dt} >= '{config.start}' AND {config.dt} < '{config.cutoff}'{other_filters})")
+    return ' AND '.join(filters) or '1'
 
 
 def source_sql(config: Config, side: str, start: str, end: str, key_range: str) -> str:
-    """The rows of one side in [start, end) and the key range, from the config's source."""
-    return Template((SQL_DIR / 'sources' / config.source).read_text()).substitute(
+    """The rows of one side in [start, end) and the key range, from the config's source; indented to its place in
+    compare.sql."""
+    sql = TEMPLATES[f'sources/{config.source}'].substitute(
         table=config.old if side == 'old' else config.new, dt=config.dt, start=start, end=end, key_range=key_range,
         where=side_where(config, side))
+    return sql.strip().replace('\n', '\n' + ' ' * 12)
 
 
 def from_template(file_name: str, config: Config, values: dict[str, str]) -> str:
     """A template with its placeholders filled in, wrapped so that it runs where the data is.
     For a sharded table, cluster(view(...)) sends the whole query to one replica of each shard, and the caller
     gets the shards' results concatenated."""
-    sql = Template((SQL_DIR / file_name).read_text()).substitute(values)
+    sql = TEMPLATES[file_name].substitute(values)
     if config.cluster is None:
         return f'SELECT * FROM (\n{sql}\n)'
     return f"SELECT * FROM cluster('{config.cluster}', view(\n{sql}\n))"
@@ -145,18 +148,11 @@ def table_values(config: Config, start: str, end: str, common_groups: bool = Tru
 
 
 def compare_sql(config: Config, period: Period, key_range: str) -> str:
-    example = [key for key in config.keys if key not in config.group_by]
     return from_template('compare.sql', config, dict(
         old_source=source_sql(config, 'old', period.start, period.end, key_range),
         new_source=source_sql(config, 'new', period.start, period.end, key_range),
         keys=', '.join(config.keys), value=config.value, dt=config.dt, tolerance=repr(FLOAT_TOLERANCE),
-        group_cells=''.join(f'toString({column}), ' for column in config.group_by),
-        example_columns=''.join(f'{column}, ' for column in example)))
-
-
-def example_names(config: Config) -> list[str]:
-    """The fields of an example key in compare.sql's output."""
-    return [key for key in config.keys if key not in config.group_by] + ['old', 'new']
+        group_cells=''.join(f'toString({column}), ' for column in config.group_by)))
 
 
 # ---------- windows ----------
@@ -210,7 +206,7 @@ def cut(config: Config, period: Period) -> Cuts:
     counts = from_template('counts.sql', config, dict(
         **table_values(config, period.start, period.end), buckets=', '.join(buckets),
         bucket_literals=f"[{', '.join(literal_sql(column, types[column]) for column in buckets)}]"))
-    sql = Template((SQL_DIR / 'cuts.sql').read_text()).substitute(
+    sql = TEMPLATES['cuts.sql'].substitute(
         counts=counts, buckets=', '.join(buckets), window_rows=str(WINDOW_ROWS * shard_count(config)))
     row = run_query_json(sql, timeout_s=1800)[0]
     edges: list[list[str] | None] = [None, *row['cuts'], None]
@@ -243,15 +239,6 @@ def coverage(config: Config) -> dict[str, list[dict[str, Any]]]:
 
 # ---------- result files ----------
 
-def fingerprint(config: Config) -> str:
-    """Changes whenever the config, the SQL templates or the constants change; results with another fingerprint
-    are stale."""
-    digest = hashlib.sha256(repr((config, FLOAT_TOLERANCE, WINDOW_ROWS)).encode())
-    for path in sorted(SQL_DIR.rglob('*.sql')):
-        digest.update(path.read_bytes())
-    return digest.hexdigest()[:16]
-
-
 def describe(config: Config) -> dict[str, object]:
     """What a reader of the results needs to know about the comparison, without configs.py."""
     return dict(old=config.old, new=config.new, keys=list(config.keys), value=config.value,
@@ -262,11 +249,10 @@ def describe(config: Config) -> dict[str, object]:
 
 class Month(TypedDict):
     """One results/<config>/YYYY/YYYY-MM.json. deviations: group value → … → day → cell, failing cells only;
-    a cell holds the keys per failing category, max_diff_pct for 'differs', and up to 3 example keys."""
+    a cell holds the keys per failing category, and max_diff_pct for 'differs'."""
     month: str
-    fingerprint: str
     config: dict[str, object]
-    period: dict[str, object]  # the period the month was compared in: name, windows, query_s
+    period: dict[str, object]  # the period the month was compared in: name, windows, started, finished (UTC)
     rows: dict[str, int]       # old, new: as FINAL shows them
     keys: dict[str, int]       # per category
     deviations: dict[str, Any]
@@ -277,18 +263,25 @@ def failing_keys(keys: dict[str, int]) -> int:
     return sum(keys.get(category, 0) for category in CATEGORIES if category != 'equal')
 
 
+def is_cell(node: object) -> bool:
+    """Whether a node of the deviations is a cell (category counts), not a level of groups or days."""
+    return isinstance(node, dict) and bool(node) and not any(isinstance(child, dict) for child in node.values())
+
+
 def to_json(value: object) -> str:
-    """Pretty-printed JSON, except that a cell of the deviations (a dict with examples) stays on one line."""
+    """Pretty-printed JSON, except that the cells under 'deviations' stay on one line each."""
     cells: list[object] = []
 
     def mark(node: object) -> object:
-        if isinstance(node, dict) and 'examples' in node:
+        if is_cell(node):
             cells.append(node)
             return f'<cell {len(cells) - 1}>'
         if isinstance(node, dict):
             return {key: mark(child) for key, child in node.items()}
         return node
-    text = json.dumps(mark(value), indent=2)
+    if isinstance(value, dict) and 'deviations' in value:
+        value = {**value, 'deviations': mark(value['deviations'])}
+    text = json.dumps(value, indent=2)
     return re.sub(r'"<cell (\d+)>"', lambda match: json.dumps(cells[int(match.group(1))]), text)
 
 
@@ -307,9 +300,6 @@ def coverage_path(config_name: str) -> Path:
     return RESULTS_DIR / config_name / 'coverage.json'
 
 
-def load_json(path: Path, config: Config) -> Any:
-    """The content of a result file, or None if it is missing or stale."""
-    if not path.exists():
-        return None
-    content = json.loads(path.read_text())
-    return content if content.get('fingerprint') == fingerprint(config) else None
+def load_json(path: Path) -> Any:
+    """The content of a result file, or None if it is missing."""
+    return json.loads(path.read_text()) if path.exists() else None

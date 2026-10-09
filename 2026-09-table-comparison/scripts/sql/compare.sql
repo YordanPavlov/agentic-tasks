@@ -2,16 +2,14 @@
 -- and cell. A cell is a group (config.group_by) and day; equal keys are only counted per month.
 -- Runs on one shard against its local tables, or on the connected broker for a fully replicated table.
 --
--- Inputs, filled in by common.py from the config:
---   $$old_source, $$new_source  the rows of each side in the window (sql/sources/); they apply the time range,
+-- Placeholders, filled in by common.py from the config:
+--   old_source, new_source       the rows of each side in the window (sql/sources/); they apply the time range,
 --                                the key range and the filters
---   $$keys                       the key columns
---   $$value                      the value column
---   $$dt                         the time column
---   $$tolerance                  relative tolerance: a smaller difference is equal
---   $$group_cells                the group_by columns as strings, each followed by a comma; empty without group_by
---   $$example_columns            the key columns not in group_by, each followed by a comma: they identify a key
---                                within its cell
+--   keys                         the key columns
+--   value                        the value column
+--   dt                           the time column
+--   tolerance                    relative tolerance: a smaller difference is equal
+--   group_cells                  the group_by columns as strings, each followed by a comma; empty without group_by
 --
 -- Read it from the innermost layer outwards:
 --   1. the rows of both sides, each with its side
@@ -23,9 +21,7 @@ SELECT
     count() AS keys,
     sum(old_rows) AS old_row_count,
     sum(new_rows) AS new_row_count,
-    max(diff) AS max_diff,
-    argMax(example, diff) AS max_diff_example,
-    groupArray(3)(example) AS examples
+    max(diff) AS max_diff
 FROM
 (
     -- 2. One row per key. FINAL leaves one row per sorting key, so a side has several rows for a key only if the
@@ -43,12 +39,11 @@ FROM
             old_rows = 0,           'missing_in_old',
             new_rows > 1,           'new_multi',
             old_rows > 1,           'old_multi',
-            diff <= $tolerance,     'equal',
+            diff <= $tolerance,          'equal',
                                     'differs') AS category,
         if(category = 'equal',
            [toString(toStartOfMonth(min(cmp_day)))],
-           [${group_cells}toString(min(cmp_day))]) AS cell,
-        tuple(${example_columns}if(old_rows = 0, NULL, old_value), if(new_rows = 0, NULL, new_value)) AS example
+           [${group_cells}toString(min(cmp_day))]) AS cell
     FROM
     (
         -- 1. Both sources unified. The default source reads the table with FINAL: what consumers see, i.e. the

@@ -8,69 +8,61 @@ usage: compare.py <config> [PERIOD ...] [--parallel N] [--max-failing-keys N] [-
   --parallel N  queries in flight at once (default 2, the limit for long queries on prod)
   --max-failing-keys N  stop after the month in which the failing keys of all months pass N (default 100,000):
                 the new table needs a closer look first
-  --force       re-run periods that already have results, e.g. after the data changed
+  --force       re-run periods that already have results: after the data, the config or the SQL changed
   --print-sql   print the query of one window of one period and exit
 """
 from __future__ import annotations
 
 import argparse
+import datetime
 import os
 import sys
-import time
 from collections import deque
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from typing import Any
 
 from common import (CATEGORIES, Cuts, Month, Period, compare_sql, coverage, coverage_path, cut, describe,
-                    example_names, failing_keys, fingerprint, load_config, load_json, month_path, months, periods,
-                    run_query_json, write_json)
+                    failing_keys, is_cell, load_config, load_json, month_path, months, periods, run_query_json,
+                    write_json)
 from configs import Config
 
-WindowResult = tuple[list[dict[str, Any]], float]  # compare.sql's rows, query time in seconds
+WindowResult = tuple[list[dict[str, Any]], str]  # compare.sql's rows, the time the query finished
+
+
+def now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
 
 
 def run_window(config: Config, period: Period, key_range: str) -> WindowResult:
-    started = time.monotonic()
-    rows = run_query_json(compare_sql(config, period, key_range), timeout_s=7200)
-    return rows, time.monotonic() - started
+    return run_query_json(compare_sql(config, period, key_range), timeout_s=7200), now()
 
 
-def add_to_cell(cell: dict[str, Any], row: dict[str, Any], names: list[str]) -> None:
+def add_to_cell(cell: dict[str, Any], row: dict[str, Any]) -> None:
     """Adds one row of compare.sql (one category of a cell, from one window and shard) to the cell."""
     category = row['category']
     cell[category] = cell.get(category, 0) + row['keys']
-    examples = cell.pop('examples', {})  # popped and put back, so that it stays the cell's last field
-    category_examples = examples.setdefault(category, [])
     if category == 'differs' and row['max_diff'] is not None:
-        max_diff_pct = float(f"{row['max_diff'] * 100:.3g}")
-        if max_diff_pct > cell.get('max_diff_pct', -1):
-            cell['max_diff_pct'] = max_diff_pct
-            category_examples.insert(0, dict(zip(names, row['max_diff_example'])))  # the largest difference first
-    for example in row['examples']:
-        if dict(zip(names, example)) not in category_examples:
-            category_examples.append(dict(zip(names, example)))
-    del category_examples[3:]
-    cell['examples'] = examples
+        cell['max_diff_pct'] = max(cell.get('max_diff_pct', 0.0), float(f"{row['max_diff'] * 100:.3g}"))
 
 
 def sorted_tree(node: dict[str, Any]) -> dict[str, Any]:
     """The nested deviations sorted by key, numbers by value: groups such as asset ids, then days."""
     def order(key: str) -> tuple[int, int | str]:
         return (0, int(key)) if key.isdigit() else (1, key)
-    if 'examples' in node:  # a cell
-        return node
+    if is_cell(node):  # categories in a fixed order, then max_diff_pct
+        return {field: node[field] for field in (*CATEGORIES, 'max_diff_pct') if field in node}
     return {key: sorted_tree(node[key]) for key in sorted(node, key=order)}
 
 
-def build_months(config: Config, period: Period, cuts: Cuts, results: list[WindowResult]) -> list[Month]:
+def build_months(config: Config, period: Period, started: str, cuts: Cuts,
+                 results: list[WindowResult]) -> list[Month]:
     """The month files of a finished period. Fails if the windows' rows don't add up to the period's counts."""
-    months = {month: Month(month=month, fingerprint=fingerprint(config), config=describe(config),
-                           period=dict(name=period.name, windows=len(results),
-                                       query_s=round(sum(elapsed for _, elapsed in results))),
+    finished = max(finished for _, finished in results)
+    months = {month: Month(month=month, config=describe(config),
+                           period=dict(name=period.name, windows=len(results), started=started, finished=finished),
                            rows={'old': 0, 'new': 0}, keys={}, deviations={})
               for month in period.months}
-    names = example_names(config)
     for rows, _ in results:
         for row in rows:
             cell_path = [str(part) for part in row['cell']]  # group values and day, or the month for equal keys
@@ -83,7 +75,7 @@ def build_months(config: Config, period: Period, cuts: Cuts, results: list[Windo
             node = month['deviations']
             for part in cell_path:
                 node = node.setdefault(part, {})
-            add_to_cell(node, row, names)
+            add_to_cell(node, row)
     old_rows = sum(month['rows']['old'] for month in months.values())
     new_rows = sum(month['rows']['new'] for month in months.values())
     if (old_rows, new_rows) != (cuts.old_rows, cuts.new_rows):
@@ -97,7 +89,9 @@ def build_months(config: Config, period: Period, cuts: Cuts, results: list[Windo
 
 def report(month: Month) -> str:
     failing = ', '.join(f'{category}={keys:,}' for category, keys in month['keys'].items() if category != 'equal')
-    return (f"{month['month']}  {month['period']['windows']:>3} windows  {month['period']['query_s']:>6} s  "
+    elapsed = (datetime.datetime.fromisoformat(str(month['period']['finished']))
+               - datetime.datetime.fromisoformat(str(month['period']['started'])))
+    return (f"{month['month']}  {month['period']['windows']:>3} windows  {elapsed.total_seconds():>6.0f} s  "
             f"{month['rows']['old']:>13,} old rows  {month['rows']['new']:>13,} new rows  {failing or 'equal'}")
 
 
@@ -105,6 +99,7 @@ def report(month: Month) -> str:
 class Running:
     """A period whose windows are queued or running."""
     period: Period
+    started: str  # before the period was cut
     cuts: Cuts
     futures: list[Future[WindowResult]]
 
@@ -113,7 +108,8 @@ def finish(config_name: str, config: Config, running: Running, failing_before: i
     """Writes the months of a finished period in date order, until the failing keys of the run exceed
     max_failing; returns the failing keys of the run after it."""
     try:
-        months = build_months(config, running.period, running.cuts, [future.result() for future in running.futures])
+        months = build_months(config, running.period, running.started, running.cuts,
+                              [future.result() for future in running.futures])
     except RuntimeError as error:
         # a failed period writes nothing and is retried on the next run
         print(f'{running.period.name}  FAILED: {error}', file=sys.stderr, flush=True)
@@ -145,9 +141,10 @@ def main() -> None:
         print(compare_sql(config, period, cut(config, period).key_ranges[int(args.print_sql[1])]))
         return
 
-    if config.group_by and (args.force or load_json(coverage_path(args.config), config) is None):
+    if config.group_by and (args.force or load_json(coverage_path(args.config)) is None):
+        started = now()
         groups = coverage(config)
-        write_json(coverage_path(args.config), {'fingerprint': fingerprint(config), 'config': describe(config),
+        write_json(coverage_path(args.config), {'config': describe(config), 'started': started, 'finished': now(),
                                                 **groups})
         print(f"coverage: {len(groups['only_in_old'])} groups only in old, {len(groups['only_in_new'])} only in new",
               file=sys.stderr)
@@ -155,11 +152,11 @@ def main() -> None:
     todo = [all_periods[name] for name in args.periods] if args.periods else list(all_periods.values())
     if not args.force:
         todo = [period for period in todo
-                if any(load_json(month_path(args.config, month), config) is None for month in period.months)]
+                if any(load_json(month_path(args.config, month)) is None for month in period.months)]
     todo_months = {month for period in todo for month in period.months}
     failing = sum(failing_keys(result['keys']) for month in months(config.start, config.cutoff)
                   if month not in todo_months
-                  and (result := load_json(month_path(args.config, month), config)) is not None)
+                  and (result := load_json(month_path(args.config, month))) is not None)
     print(f'{len(todo)} of {len(all_periods)} period(s) to run; {failing:,} failing keys so far', file=sys.stderr)
 
     # Periods are cut one after the other, as soon as fewer than --parallel queries are queued, and finished in
@@ -182,13 +179,14 @@ def main() -> None:
             while len(unfinished()) >= args.parallel:
                 wait(unfinished(), return_when=FIRST_COMPLETED)
                 finish_ready()
+            started = now()
             try:
                 cuts = cut(config, period)
             except RuntimeError as error:
                 print(f'{period.name}  FAILED to cut: {error}', file=sys.stderr, flush=True)
                 continue
             futures = [pool.submit(run_window, config, period, key_range) for key_range in cuts.key_ranges]
-            queue.append(Running(period, cuts, futures))
+            queue.append(Running(period, started, cuts, futures))
             finish_ready()
         while queue and failing <= args.max_failing_keys:
             wait(unfinished(), return_when=FIRST_COMPLETED)

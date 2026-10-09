@@ -1,16 +1,16 @@
--- Cuts one time range into windows of about $$window_rows rows (both sides, all shards together), between buckets.
+-- Cuts one time range into windows of about window_rows rows (both sides, all shards together), between buckets.
 -- A bucket is never split, so all rows of a key fall into one window.
 -- Returns the rows of each side, which the windows' results must add up to, and the first bucket of every window
 -- but the first, in key order.
 --
--- Inputs: the row counts per bucket ($$counts: counts.sql, run on every shard), the bucket columns, $$window_rows.
+-- Inputs: the row counts per bucket (counts: counts.sql, run on every shard), the bucket columns, window_rows.
 SELECT
     sum(bucket_old_rows) AS old_rows,
     sum(bucket_new_rows) AS new_rows,
     arrayMap(cut -> cut.2, arraySort(groupArrayIf((rows_before, literals), starts_window))) AS cuts
 FROM
 (
-    -- a bucket starts a window if it reaches the next multiple of $$window_rows
+    -- a bucket starts a window if it reaches the next multiple of window_rows
     SELECT
         literals, bucket_old_rows, bucket_new_rows, rows_before,
         rows_before > 0

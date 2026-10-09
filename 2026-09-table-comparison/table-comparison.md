@@ -34,7 +34,7 @@ Reading the categories:
 | category | usually |
 |---|---|
 | `equal` | OK |
-| `differs` | look at the examples in the month file |
+| `differs` | list the keys of the cell with the window's query (see the README), then look at the rows |
 | `missing_in_new` / `missing_in_old` | lost in new / added in new (e.g. recovered data), or a key column that differs: then they come in equal numbers on the same days |
 | `old_multi` / `new_multi` | the configured key is coarser than that table's sorting key (see "Key changes") |
 
@@ -44,7 +44,9 @@ The previous version kept up to 10,000 key hashes per category for drill-down; t
 cache that `summary.py` could not load, and its results were spread over key ranges, not dates.
 - **One value column.** A key that doesn't match and a value that differs need the same investigation, so every
   other column is key. Balances `old*` columns are checked as invariants instead (below).
-- **Actual keys, no hashes.** Examples in the output can be queried directly. Costs ~50% more memory per window.
+- **Actual keys, no hashes.** Costs ~50% more memory per window. Example keys were dropped from the output
+  (2026-10-09): they complicated the query, and a cell's keys can be listed with the window's query.
+- **No fingerprints.** A month file records the config and when it ran; after a change, re-run with `--force`.
 - **Output per month, failing cells only**, self-describing, as input for a follow-up analysis tool (metric names,
   cross-metric dependencies).
 - **Metrics:** `daily_metrics_v2_experimental` holds a few assets (Optimism ERC-20 tokens) and lacks the metrics
@@ -73,8 +75,8 @@ cache that `summary.py` could not load, and its results were spread over key ran
      checked.
 4. **Run everything** in the background: `nohup python3 compare.py <config> > compare.log 2>&1 &`. It prints one line
    per month, and stops after the month in which the failing keys pass `--max-failing-keys` (default 100k).
-5. **`python3 summary.py <config>`.** For every failing category, take the examples from the month file and query
-   both tables for them. Find the cause from the rows.
+5. **`python3 summary.py <config>`.** For every failing category, list a few keys of a failing cell (README,
+   "The comparison query") and query both tables for them. Find the cause from the rows.
 6. **Optionally, run table invariants** (below) on both sides.
 7. **Write the executive summary**, and add the run to "Runs" below.
 

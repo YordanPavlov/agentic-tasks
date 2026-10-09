@@ -46,10 +46,11 @@ comparing. A period that covers the whole range is still computed in full; only 
 2. groups them by the key columns, so the old and new rows of a key land in one row, and gives the key a category
    and the relative difference |new − old| / max(|old|, |new|),
 3. counts the keys per category and **cell**: the `group_by` columns and the day. Equal keys are counted per
-   month only. Per cell it also keeps the largest difference and up to 3 example keys.
+   month only. Per cell it also keeps the largest difference.
 
-`compare.py <config> --print-sql <period> <window>` prints the filled-in query. To list failing keys, replace its
-outer `SELECT … GROUP BY category, cell` with `SELECT * … WHERE category = 'differs' LIMIT 10`.
+`compare.py <config> --print-sql <period> <window>` prints the filled-in query of one window (it cuts the period
+first, which takes seconds). To list the failing keys of a cell, replace its outer `SELECT … GROUP BY category,
+cell` with `SELECT * … WHERE category = 'differs' AND cell = [...] LIMIT 10`.
 
 ### Sources
 
@@ -80,16 +81,17 @@ complete: days missing on one side are failures.
 
 Under `results/<config>/`, pretty-printed JSON:
 - `YYYY/YYYY-MM.json`, one per month:
-  - `config`: what was compared (tables, keys, value, `group_by`, tolerance, filters), and a `fingerprint`
-  - `period`: the period the month was compared in, its number of windows and query time
+  - `config`: what was compared (tables, keys, value, `group_by`, tolerance, filters)
+  - `period`: the period the month was compared in, its number of `windows`, and when it `started` and
+    `finished` (UTC wall clock; periods overlap with `--parallel`)
   - `rows`: rows per side as `FINAL` shows them; `keys`: keys per category
   - `deviations`: the failing cells only, nested by the `group_by` values, then the day; one line per cell. A cell
-    holds the keys per failing category, `max_diff_pct` for `differs`, and `examples` per category: the key
-    columns not in `group_by`, with the old and new value; for `differs` the largest difference comes first.
+    holds the keys per failing category, and `max_diff_pct` for `differs`.
 - `coverage.json`: the groups present on one side only (configs with `group_by`).
 
-A change to the config, the SQL templates or `TCMP_WINDOW_ROWS` changes the fingerprint: files with another
-fingerprint are stale and their periods re-run. After the table data changes, use `--force`.
+A month whose file exists is done, and a restart skips it. After a change to the data, the config or the SQL,
+use `--force` (or delete `results/<config>/`): the files don't record which version of the SQL made them. A run
+reads the SQL templates once, at start.
 
 ## Prerequisites
 

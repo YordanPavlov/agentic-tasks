@@ -11,7 +11,7 @@ import argparse
 from collections import Counter
 from typing import Any, Iterator
 
-from common import (CATEGORIES, Month, coverage_path, failing_keys, load_config, load_json, month_path,
+from common import (CATEGORIES, Month, coverage_path, failing_keys, is_cell, load_config, load_json, month_path,
                     months)
 
 MEANING = {
@@ -26,7 +26,7 @@ MEANING = {
 
 def cells(node: dict[str, Any], path: tuple[str, ...] = ()) -> Iterator[tuple[tuple[str, ...], dict[str, Any]]]:
     """(group values and day, cell) of the nested deviations."""
-    if 'examples' in node:
+    if is_cell(node):
         yield path, node
         return
     for key, child in node.items():
@@ -42,7 +42,7 @@ def main() -> None:
     print(f'# {config.old} vs {config.new}, {config.start} .. {config.cutoff} (exclusive)')
 
     if config.group_by:
-        groups = load_json(coverage_path(args.config), config)
+        groups = load_json(coverage_path(args.config))
         if groups is None:
             print('\ncoverage: not computed; run compare.py')
         else:
@@ -53,7 +53,7 @@ def main() -> None:
     results: list[Month] = []
     missing = []
     for month in months(config.start, config.cutoff):
-        result = load_json(month_path(args.config, month), config)
+        result = load_json(month_path(args.config, month))
         if result is None:
             missing.append(month)
         else:
@@ -90,7 +90,6 @@ def main() -> None:
             counts_text = ', '.join(f'{category}={counts[category]:,}' for category in CATEGORIES if counts[category])
             max_text = f', max {max_diff_pct}%' if max_diff_pct >= 0 else ''
             print(f'  {where}  {counts_text}{max_text}')
-        print(f"  examples: {month_path(args.config, first['month'])}")
 
     keys = Counter[str]()
     rows = Counter[str]()
