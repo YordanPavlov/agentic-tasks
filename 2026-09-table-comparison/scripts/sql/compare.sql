@@ -3,11 +3,12 @@
 -- Runs on one shard against its local tables, or on the connected broker for a fully replicated table.
 --
 -- Placeholders, filled in by common.py from the config:
---   old_source, new_source       the rows of each side in the window (sql/sources/); they apply the time range,
---                                the key range and the filters
+--   old_table, new_table         the local tables
+--   dt, start, end               the time column and the range [start, end)
+--   key_range                    the window's range of buckets
+--   old_where, new_where         the filters of each side
 --   keys                         the key columns
 --   value                        the value column
---   dt                           the time column
 --   tolerance                    relative tolerance: a smaller difference is equal
 --   group_cells                  the group_by columns as strings, each followed by a comma; empty without group_by
 --
@@ -24,39 +25,35 @@ SELECT
     max(diff) AS max_diff
 FROM
 (
-    -- 2. One row per key. FINAL leaves one row per sorting key, so a side has several rows for a key only if the
-    --    configured key is coarser than that table's sorting key. diff is the relative difference of the values.
+    -- 2. One row per key. A key's value is the sum over its rows, as consumers aggregate it; diff is the relative
+    --    difference of the sums.
     SELECT
         countIf(cmp_is_new = 0) AS old_rows,
         countIf(cmp_is_new = 1) AS new_rows,
-        anyIf(cmp_value, cmp_is_new = 0) AS old_value,
-        anyIf(cmp_value, cmp_is_new = 1) AS new_value,
+        sumIf(cmp_value, cmp_is_new = 0) AS old_value,
+        sumIf(cmp_value, cmp_is_new = 1) AS new_value,
         if(old_rows = 0 OR new_rows = 0 OR old_value = new_value OR (isNaN(old_value) AND isNaN(new_value)),
            0,
            abs(old_value - new_value) / greatest(abs(old_value), abs(new_value))) AS diff,
         multiIf(
             new_rows = 0,           'missing_in_new',
             old_rows = 0,           'missing_in_old',
-            new_rows > 1,           'new_multi',
-            old_rows > 1,           'old_multi',
-            diff <= $tolerance,          'equal',
+            diff <= $tolerance,     'equal',
                                     'differs') AS category,
         if(category = 'equal',
            [toString(toStartOfMonth(min(cmp_day)))],
            [${group_cells}toString(min(cmp_day))]) AS cell
     FROM
     (
-        -- 1. Both sources unified. The default source reads the table with FINAL: what consumers see, i.e. the
-        --    latest inserted row per sorting key (or the highest version). FINAL applies per shard.
+        -- 1. Both sides with FINAL: what consumers see, i.e. the latest inserted row per sorting key (or the
+        --    highest version). FINAL applies per shard.
         SELECT 0 AS cmp_is_new, $keys, toDate($dt) AS cmp_day, toFloat64($value) AS cmp_value
-        FROM (
-            $old_source
-        )
+        FROM $old_table FINAL
+        WHERE $dt >= '$start' AND $dt < '$end' AND ($key_range) AND ($old_where)
         UNION ALL
         SELECT 1 AS cmp_is_new, $keys, toDate($dt) AS cmp_day, toFloat64($value) AS cmp_value
-        FROM (
-            $new_source
-        )
+        FROM $new_table FINAL
+        WHERE $dt >= '$start' AND $dt < '$end' AND ($key_range) AND ($new_where)
     )
     GROUP BY $keys
 )

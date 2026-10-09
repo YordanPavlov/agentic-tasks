@@ -5,19 +5,19 @@ and writes the differences per month, ordered by date.
 
 ## Method
 
-A table is described by its **keys** (the columns that identify a row) and one **value** (the column that is
-compared, as Float64 with a relative tolerance of 1e-9). Every key of both tables gets a category:
+A table is described by its **keys** and one **value**. A key's value is the sum over its rows (after `FINAL`),
+compared as Float64 with a relative tolerance of 1e-9. With the sorting key as the key, that is one row per key;
+a coarser key compares the table the way its consumers aggregate it, e.g. stacks by `(address, sign, assetRefId,
+dt, odt)`, so how an amount is split into rows is not a difference. Every key of both tables gets a category:
 
 | category | meaning |
 |---|---|
 | `equal` | the values are equal within the tolerance |
-| `differs` | one row on each side, and the values differ |
+| `differs` | the key exists on both sides, and the sums differ |
 | `missing_in_new` / `missing_in_old` | the key exists on one side only |
-| `old_multi` / `new_multi` | after `FINAL`, that side has several rows for the key: the configured key is coarser than the table's sorting key |
 
 A key column that differs makes a key `missing_in_*` on both sides; a key that does not match and a value that
-differs need the same investigation. A source can derive a key column that leaves out a known benign difference,
-e.g. `nonce_rank` for stacks (below).
+differs need the same investigation.
 
 ### Periods and windows
 
@@ -42,9 +42,10 @@ comparing. A period that covers the whole range is still computed in full; only 
 ### The comparison query
 
 `sql/compare.sql` is meant to be read; its header lists every `$placeholder`. For one window it:
-1. reads the rows of both sides,
-2. groups them by the key columns, so the old and new rows of a key land in one row, and gives the key a category
-   and the relative difference |new − old| / max(|old|, |new|),
+1. reads the rows of both sides with `FINAL`, i.e. as consumers see them: for each sorting key, the latest
+   inserted row (or the highest version). Unmerged copies are not differences.
+2. groups them by the key columns, so the old and new rows of a key land in one row, sums each side's values, and
+   gives the key a category and the relative difference |new − old| / max(|old|, |new|),
 3. counts the keys per category and **cell**: the `group_by` columns and the day. Equal keys are counted per
    month only. Per cell it also keeps the largest difference.
 
@@ -52,21 +53,12 @@ comparing. A period that covers the whole range is still computed in full; only 
 first, which takes seconds). To list the failing keys of a cell, replace its outer `SELECT … GROUP BY category,
 cell` with `SELECT * … WHERE category = 'differs' AND cell = [...] LIMIT 10`.
 
-### Sources
-
-Each side is read through a **source** (`sql/sources/`, `source` in the config), the innermost query of
-`compare.sql`. The default, `plain.sql`, reads the table with `FINAL`, i.e. as consumers see it: for each sorting
-key, the latest inserted row (or the highest version). Unmerged copies are not differences.
-
-A table-specific source may derive key columns, e.g. `xrp_stacks.sql` ranks `nonce` within its block, so that a
-renumbering is not a difference. A source must apply `$key_range` to the bucket columns as they are in the table,
-and return exactly the rows of the table with `FINAL`: the check counts the table.
-
 ### Where it runs
 
 - **Sharded tables** (`cluster` set): `cluster(..., view(...))` sends each query to one replica of each shard,
   and it runs against that shard's local tables. This assumes old and new place a key on the same shard; a key
-  placed differently shows up as `missing_in_new` on one shard and `missing_in_old` on another.
+  placed differently shows up as `missing_in_new` on one shard and `missing_in_old` on another. A key whose rows
+  are spread over shards is compared once per shard, so a coarser key needs all its rows on one shard.
 - **Fully replicated tables** (`cluster=None`, e.g. the metrics tables): the query runs on the broker the
   connection lands on.
 

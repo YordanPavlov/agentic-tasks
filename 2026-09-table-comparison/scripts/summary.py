@@ -17,9 +17,7 @@ from common import (CATEGORIES, Month, coverage_path, failing_keys, is_cell, loa
 MEANING = {
     'missing_in_new': 'key only in old',
     'missing_in_old': 'key only in new',
-    'differs': 'one row each, the values differ by more than the tolerance',
-    'new_multi': "new has several rows for the key: the key is coarser than new's sorting key",
-    'old_multi': "old has several rows for the key: the key is coarser than old's sorting key",
+    'differs': "the sums of the key's values differ by more than the tolerance",
     'equal': 'equal within the tolerance',
 }
 

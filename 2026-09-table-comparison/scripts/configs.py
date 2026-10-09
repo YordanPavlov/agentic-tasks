@@ -6,15 +6,16 @@ Fields of Config:
                tables, which relies on old and new placing a key on the same shard (see README.md).
                None for a table fully replicated to every broker: it is compared on the connected broker.
   dt           DateTime/Date column; [start, cutoff) is a range of it, and the output is per day of it.
-  keys         Columns identifying a row: everything but the value. Usually the ReplacingMergeTree sorting key.
-  value        The one compared column, numeric; compared as Float64 with a relative tolerance.
+  keys         Columns a key is made of. Usually the ReplacingMergeTree sorting key; a coarser key compares the
+               table the way its consumers aggregate it.
+  value        The one compared column, numeric: summed over a key's rows and compared as Float64 with a relative
+               tolerance.
   buckets      Key columns the key space is cut on into windows, a prefix of both sorting keys. A bucket is never
                split, so it should hold far fewer rows than a window.
   monthly      True if the tables are partitioned by month: each month is cut and compared on its own. False
                cuts the whole range at once.
   group_by     Key columns the output is broken down by, before the day, e.g. asset and metric.
   common_groups_only  Compare only the group_by groups present on both sides; the others go to coverage.json.
-  source       File in sql/sources/ that reads one side; it may derive columns, e.g. a rank. Default plain.sql.
   start, cutoff  'YYYY-MM-DD'; cutoff is exclusive. Leave the live tail out: it is still being written.
   where, where_old, where_new  Optional SQL filters on both sides / one side.
 """
@@ -37,7 +38,6 @@ class Config:
     monthly: bool = True
     group_by: tuple[str, ...] = ()
     common_groups_only: bool = False
-    source: str = 'plain.sql'
     where: str = '1'
     where_old: str = '1'
     where_new: str = '1'
@@ -51,11 +51,12 @@ CONFIGS: dict[str, Config] = {
         value='balance', buckets=('dt',),
         start='2013-01-01', cutoff='2026-09-26'),
     'xrp_stacks': Config(
-        # nonce is offset in old: the key uses nonce_rank from the source instead
+        # The key the metric jobs aggregate by (daily_metrics/job_functions/xrp_stacks.py); contractAddress is 1:1
+        # with assetRefId and is there for the buckets. How a key's amount is split into stacks is not compared.
         old='default.xrp_stacks_shard_v8', new='default.xrp_stacks_shard_v9', cluster='default_cluster',
         dt='dt',
-        keys=('contractAddress', 'address', 'sign', 'blockNumber', 'nonce_rank', 'dt', 'odt', 'assetRefId', 'txID'),
-        value='amount', buckets=('contractAddress', 'address', 'sign'), source='xrp_stacks.sql',
+        keys=('contractAddress', 'address', 'sign', 'assetRefId', 'dt', 'odt'),
+        value='amount', buckets=('contractAddress', 'address', 'sign'),
         start='2013-01-01', cutoff='2026-09-03'),
     'daily_metrics': Config(
         old='default.daily_metrics_v2', new='default.daily_metrics_v2_experimental', cluster=None,

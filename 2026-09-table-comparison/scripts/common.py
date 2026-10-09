@@ -31,7 +31,7 @@ WINDOW_ROWS = int(os.environ.get('TCMP_WINDOW_ROWS', 20_000_000))
 LOG_COMMENT = json.dumps({'job': 'table-compare', 'owner': 'yordan.p@santiment.net', 'team': 'bigdata',
                           'repo': 'clickhouse-tables', 'dag': 'manual-tests'})
 
-CATEGORIES = ('missing_in_new', 'missing_in_old', 'differs', 'new_multi', 'old_multi', 'equal')
+CATEGORIES = ('missing_in_new', 'missing_in_old', 'differs', 'equal')
 # Network errors (209 timeout, 210 connection refused, 32 unexpected EOF) are retried; anything else is final.
 RETRYABLE_ERROR_CODES = {'32', '209', '210'}
 
@@ -43,10 +43,7 @@ def run_query(sql: str, output_format: str = 'TSV', timeout_s: int = 1800) -> st
     because --format overrides a FORMAT clause anyway."""
     command = ['clickhouse-client', '-h', HOST, '--port', PORT, '-u', USER, f'--log_comment={LOG_COMMENT}',
                f'--max_execution_time={timeout_s}', '--output_format_json_quote_64bit_integers=0',
-               f'--format={output_format}',
-               # sources select *, which would leave out MATERIALIZED and ALIAS columns
-               '--asterisk_include_materialized_columns=1', '--asterisk_include_alias_columns=1',
-               '--query', sql]
+               f'--format={output_format}', '--query', sql]
     for attempt in range(3):
         process = subprocess.run(command, capture_output=True, text=True)
         if process.returncode == 0:
@@ -121,15 +118,6 @@ def side_where(config: Config, side: str, common_groups: bool = True) -> str:
     return ' AND '.join(filters) or '1'
 
 
-def source_sql(config: Config, side: str, start: str, end: str, key_range: str) -> str:
-    """The rows of one side in [start, end) and the key range, from the config's source; indented to its place in
-    compare.sql."""
-    sql = TEMPLATES[f'sources/{config.source}'].substitute(
-        table=config.old if side == 'old' else config.new, dt=config.dt, start=start, end=end, key_range=key_range,
-        where=side_where(config, side))
-    return sql.strip().replace('\n', '\n' + ' ' * 12)
-
-
 def from_template(file_name: str, config: Config, values: dict[str, str]) -> str:
     """A template with its placeholders filled in, wrapped so that it runs where the data is.
     For a sharded table, cluster(view(...)) sends the whole query to one replica of each shard, and the caller
@@ -141,7 +129,7 @@ def from_template(file_name: str, config: Config, values: dict[str, str]) -> str
 
 
 def table_values(config: Config, start: str, end: str, common_groups: bool = True) -> dict[str, str]:
-    """The placeholders of the templates that read the tables directly (counts.sql, coverage.sql)."""
+    """The placeholders of the templates that read the tables."""
     return dict(old_table=config.old, new_table=config.new, dt=config.dt, start=start, end=end,
                 old_where=side_where(config, 'old', common_groups),
                 new_where=side_where(config, 'new', common_groups))
@@ -149,9 +137,8 @@ def table_values(config: Config, start: str, end: str, common_groups: bool = Tru
 
 def compare_sql(config: Config, period: Period, key_range: str) -> str:
     return from_template('compare.sql', config, dict(
-        old_source=source_sql(config, 'old', period.start, period.end, key_range),
-        new_source=source_sql(config, 'new', period.start, period.end, key_range),
-        keys=', '.join(config.keys), value=config.value, dt=config.dt, tolerance=repr(FLOAT_TOLERANCE),
+        **table_values(config, period.start, period.end), key_range=key_range,
+        keys=', '.join(config.keys), value=config.value, tolerance=repr(FLOAT_TOLERANCE),
         group_cells=''.join(f'toString({column}), ' for column in config.group_by)))
 
 
@@ -243,7 +230,7 @@ def describe(config: Config) -> dict[str, object]:
     """What a reader of the results needs to know about the comparison, without configs.py."""
     return dict(old=config.old, new=config.new, keys=list(config.keys), value=config.value,
                 group_by=list(config.group_by), dt=config.dt, start=config.start, cutoff=config.cutoff,
-                tolerance=FLOAT_TOLERANCE, common_groups_only=config.common_groups_only, source=config.source,
+                tolerance=FLOAT_TOLERANCE, common_groups_only=config.common_groups_only,
                 where=config.where, where_old=config.where_old, where_new=config.where_new)
 
 
