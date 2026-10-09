@@ -1,92 +1,110 @@
 # Old-vs-new table comparison
 
-Compares two versions of a ClickHouse table key by key, over the full history, reading each granule about once.
+Compares two versions of a ClickHouse table key by key, over the full history, reading each granule about once,
+and writes the differences per month, ordered by date.
 
 ## Method
 
-The key space is split into **windows**: ranges of a prefix of the sorting key, of about 20M rows per shard
-(both sides together; `TCMP_WINDOW_ROWS`), which takes about 7 GiB per query. For each window, one
-query:
-1. reduces every row of both tables to a key hash, a hash of the values and the float values,
-2. groups by the key hash, so the old and new versions of a key land in one row,
-3. gives each key a category,
-4. counts keys per day and category, keeping up to 10,000 key hashes per category for drill-down.
+A table is described by its **keys** (the columns that identify a row) and one **value** (the column that is
+compared, as Float64 with a relative tolerance of 1e-9). Every key of both tables gets a category:
 
-The query is in `sql/compare.sql` and is meant to be read. Its header lists every `$placeholder`: tables,
-window, tolerance, column lists and filters, all filled in from the config. `compare.py <config> <N>
---print-sql` prints the filled-in query of window N, ready to paste into `clickhouse-client`.
+| category | meaning |
+|---|---|
+| `equal` | the values are equal within the tolerance |
+| `differs` | one row on each side, and the values differ |
+| `missing_in_new` / `missing_in_old` | the key exists on one side only |
+| `old_multi` / `new_multi` | after `FINAL`, that side has several rows for the key: the configured key is coarser than the table's sorting key |
 
-### Windows
+A key column that differs makes a key `missing_in_*` on both sides; a key that does not match and a value that
+differs need the same investigation. A source can derive a key column that leaves out a known benign difference,
+e.g. `nonce_rank` for stacks (below).
 
-A single query over a large month can exceed the server's memory (the GROUP BY holds every key), so the work is
-cut by key, not by time:
-- **Bound columns:** the longest prefix shared by both tables' sorting keys, of configured key columns with the same
-  type on both sides, e.g. `dt, assetRefId, …` for XRP balances and `contractAddress, address, sign` for stacks.
-  Every row of a key then falls in one window, so the results of the windows simply add up.
-- **Bounds** (`sql/bounds.sql`, via `sql/index.sql`): `mergeTreeIndex()` lists the first key of every granule
-  (8192 rows) of both tables in [start, cutoff), on every shard. Ranked by key, they give row-count quantiles of the
-  key, however skewed it is. Only the indexes are read; this takes seconds.
-- **The filter** is written as nested column comparisons (`a > x OR (a = x AND b >= y)`), which the primary index
-  uses. It does not use a tuple comparison `(a, b) >= (x, y)`. Strings are written as `unhex('…')`.
-- The bounds are computed once per config and cached. Stale bounds after merges or new data are still correct, the
-  windows are just less even, so `--force` keeps them. Delete `bounds.json` to recompute them.
-- The windows ignore months: for balances (`dt` leads) a window is a time range; for stacks, a range of contracts
-  and addresses across all months.
+### Periods and windows
 
-Where it runs:
-- **Sharded tables** (`cluster` set in the config): `cluster(..., view(...))` sends the query to one replica of
-  each shard, and it runs against that shard's local tables. This needs old and new to place a key on the
-  same shard. `summary.py` checks this: a key that is `only_old` on one shard and `only_new` on another is
-  reported as moved, not lost.
-- **Fully replicated tables** (`cluster=None`): the query runs on the broker the connection lands on.
+The work is cut by time, then by key:
+- **Period:** a month for tables partitioned by month (`monthly=True`), the whole range otherwise. A month filter
+  on a table that isn't partitioned by month would read the same granules once per month.
+- **Window:** a range of the **bucket columns** (`buckets`, a prefix of both sorting keys and part of the key)
+  of about `TCMP_WINDOW_ROWS` rows per shard, both sides together (default 20M). The query of a window holds all
+  its keys in memory: ~10.5 GiB per shard at 20M rows of stacks. All rows of a key fall into one window, so the results of the windows add up.
+- **Cutting** (`sql/counts.sql`, `sql/cuts.sql`): per period, `count()` with `FINAL` per bucket and side, then
+  a running sum cuts the buckets into windows. A bucket is never split. The window filter is written as nested
+  column comparisons (`a > x OR (a = x AND b >= y)`), which the primary index uses; strings as `unhex('…')`.
+- **Check:** the rows of a period's windows must add up to these counts, or the period fails.
+
+Periods run in date order, `--parallel` window queries at a time (default 2). A month's file is written once its
+period is done, so an interrupted run resumes with the first unfinished period.
+
+**Early stop:** once the failing keys of all months pass `--max-failing-keys` (default 100,000), no further months
+are written or started: with that many differences, the new table needs a closer look before the rest is worth
+comparing. A period that covers the whole range is still computed in full; only its later months are not written.
+
+### The comparison query
+
+`sql/compare.sql` is meant to be read; its header lists every `$placeholder`. For one window it:
+1. reads the rows of both sides,
+2. groups them by the key columns, so the old and new rows of a key land in one row, and gives the key a category
+   and the relative difference |new − old| / max(|old|, |new|),
+3. counts the keys per category and **cell**: the `group_by` columns and the day. Equal keys are counted per
+   month only. Per cell it also keeps the largest difference and up to 3 example keys.
+
+`compare.py <config> --print-sql <period> <window>` prints the filled-in query. To list failing keys, replace its
+outer `SELECT … GROUP BY category, cell` with `SELECT * … WHERE category = 'differs' LIMIT 10`.
 
 ### Sources
 
 Each side is read through a **source** (`sql/sources/`, `source` in the config), the innermost query of
-`compare.sql` and `rows.sql`. The default, `plain.sql`, reads the table with `FINAL`, i.e. as consumers see it: for
-each sorting key, the latest inserted row (or the highest version). Unmerged copies are not differences.
+`compare.sql`. The default, `plain.sql`, reads the table with `FINAL`, i.e. as consumers see it: for each sorting
+key, the latest inserted row (or the highest version). Unmerged copies are not differences.
 
-A table-specific source may derive columns that the config then uses as keys or values, e.g. `xrp_stacks.sql` ranks
-`nonce` within its block, so that a renumbering is not a difference. A source must apply `$key_range` to the window
-columns as they are in the table and keep all rows of a key in one window. Column types come from `DESCRIBE` of
-the source.
+A table-specific source may derive key columns, e.g. `xrp_stacks.sql` ranks `nonce` within its block, so that a
+renumbering is not a difference. A source must apply `$key_range` to the bucket columns as they are in the table,
+and return exactly the rows of the table with `FINAL`: the check counts the table.
 
-### Categories
+### Where it runs
 
-| category | meaning |
-|---|---|
-| `equal` | identical |
-| `float_noise` | floats differ by at most 1e-9 relative; everything else is identical |
-| `soft_diff` | only a soft value (`soft_values` in the config) differs; passes, but compare.py and summary.py show it |
-| `old_multi` / `new_multi` | after `FINAL`, that side still has several different rows for the key: the configured key is coarser than the table's sorting key |
-| `value_diff` | one row on each side, and a non-float value differs |
-| `float_diff` | one row on each side, and a float differs by more than 1e-9 relative |
-| `only_old` / `only_new` | the key exists on one side only |
+- **Sharded tables** (`cluster` set): `cluster(..., view(...))` sends each query to one replica of each shard,
+  and it runs against that shard's local tables. This assumes old and new place a key on the same shard; a key
+  placed differently shows up as `missing_in_new` on one shard and `missing_in_old` on another.
+- **Fully replicated tables** (`cluster=None`, e.g. the metrics tables): the query runs on the broker the
+  connection lands on.
 
-The keys are compared exactly as configured. A key column that the pipeline computes, such as `nonce` in stacks,
-is part of the test, and a renumbering shows up as `only_old` + `only_new` pairs, unless a source derives an
-offset-free key from it and the raw column is a soft value.
+### Groups and coverage
+
+`group_by` breaks the output down by key columns before the day, e.g. `asset_id, metric_id` for metrics. With
+`common_groups_only`, only the groups present on both sides are compared; `coverage.json` lists the others (e.g.
+metrics the experimental run did not compute), with their rows. A group present on both sides is expected to be
+complete: days missing on one side are failures.
+
+## Output
+
+Under `results/<config>/`, pretty-printed JSON:
+- `YYYY/YYYY-MM.json`, one per month:
+  - `config`: what was compared (tables, keys, value, `group_by`, tolerance, filters), and a `fingerprint`
+  - `period`: the period the month was compared in, its number of windows and query time
+  - `rows`: rows per side as `FINAL` shows them; `keys`: keys per category
+  - `deviations`: the failing cells only, nested by the `group_by` values, then the day; one line per cell. A cell
+    holds the keys per failing category, `max_diff_pct` for `differs`, and `examples` per category: the key
+    columns not in `group_by`, with the old and new value; for `differs` the largest difference comes first.
+- `coverage.json`: the groups present on one side only (configs with `group_by`).
+
+A change to the config, the SQL templates or `TCMP_WINDOW_ROWS` changes the fingerprint: files with another
+fingerprint are stale and their periods re-run. After the table data changes, use `--force`.
 
 ## Prerequisites
 
 `clickhouse-client` on the PATH. Connection: `TCMP_HOST` (default `clickhouse.production.san`), `TCMP_PORT`
-(`30900`), `TCMP_USER` (`readonly`). The `readonly` user is enough.
+(`30900`), `TCMP_USER` (`readonly`). The `readonly` user is enough. `TCMP_RESULTS` moves the output.
 
 ## Usage
 
 Run from this directory. `<config>` is a key of `CONFIGS` in `configs.py`.
 
-1. Add a config to `configs.py`: the local tables, cluster, keys, values, start and cutoff.
-2. `python3 compare.py <config> 0`: computes the bounds, prints the number of windows and runs window 0. The
-   windows are about equal, so its time times the number of windows, halved for 2 in parallel, estimates the run.
-3. `nohup python3 compare.py <config> > compare.log 2>&1 &`: run all windows, 2 in parallel.
-4. `python3 summary.py <config>`: totals, failing days, samples and the verdict.
-5. `python3 rows.py <config> <day> --window N <hash> ...`: the actual rows behind sample hashes, as the source
-   returns them (scans the month of day within window N); summary.py prints these commands.
-
-The bounds and the results per window are cached under `$TCMP_CACHE/<config>/` (default `~/.cache/table-cmp`), so a
-run resumes where it stopped. A change to the config, the SQL templates or `TCMP_WINDOW_ROWS` makes the bounds
-stale: they are recomputed and every window is re-run. After the table data changes (a backfill progressed,
-merges), use `--force`.
+1. Add a config to `configs.py`: the local tables, cluster, keys, value, buckets, start and cutoff.
+2. `python3 compare.py <config> <YYYY-MM>`: one heavy month. Its time, times the number of comparable months,
+   halved for 2 in parallel, estimates the run.
+3. `nohup python3 compare.py <config> > compare.log 2>&1 &`: all periods, one line per month.
+4. `python3 summary.py <config>`: coverage, failing months, the failing groups (or days) of the first failing
+   month, keys per category and the verdict.
 
 Type check: `mypy --strict *.py`.
