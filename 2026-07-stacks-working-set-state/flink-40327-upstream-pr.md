@@ -97,9 +97,9 @@ Additionally:
       infra: minikube startup + 404/429 download rate limits — same cause
       failed Azure build 78149). Fork checks do NOT propagate to the
       upstream PR (verified: empty statusCheckRollup) — paste run link.
-- [ ] Yordan: comment green fork-CI run link on the PR
-- [ ] Yordan: `@flinkbot run azure` again to clear Azure FAILURE badge
-- [ ] Yordan: reply to Zakelly Lan on FLINK-40327 with the PR link
-- [ ] Ask in PR/JIRA about backport to release-2.3
-- [ ] After merge: note fixed version in flink-patches/README.md; drop
-      Dockerfile injection on the version bump that contains the fix
+- [x] Merged to apache/flink master 2026-10-08 (0edbffc538a), FLINK-40327
+      resolved with fix version 2.4.0. Not backported to release-2.3. The
+      CI-link, Azure-rerun and JIRA-reply items above became moot with the merge.
+- [x] Fixed version noted in etherbi-flink flink-patches/README.md (2026-10-09)
+- [ ] On the bump to Flink 2.4.0: delete the patched copy and its Dockerfile
+      injection
