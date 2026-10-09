@@ -4,6 +4,8 @@
 **Status:** Per-month output (`scripts/`, described in `scripts/README.md`), implemented 2026-10-09; stacks are
 compared by the consumers' key since then. `xrp_stacks`: equal through 2025-06-16; everything after traces back to
 old losing blocks in June 2025 (see "Runs"). A full re-run with the consumers' key is running (2026-10-09).
+`daily_metrics` (Optimism): the experimental run's P/L family is broken by job ordering; fix on branch
+`seamDependsOnPrice` (pushed, no PR yet); re-run pending.
 **Origin:** [`2026-09-rerun-comparison-framework`](../2026-09-rerun-comparison-framework/rerun-comparison-framework.md)
 has the development history and the first XRP balances results.
 
@@ -158,7 +160,7 @@ Not checked: months skipped, invariants not run, open questions (e.g. backfill e
 | 2026-10-02 | `xrp_balances` 2013-01..02, `xrp_stacks` 2013-02..03 and 2024-01 | current | validation of the new scripts, below |
 | 2026-10-07 | `xrp_stacks` 2013-01 .. 2026-09-03, full | key-range windows (314) | DIFFERS, below |
 | 2026-10-09 | `xrp_stacks` 2013-02..06, 2024-01 | per-month output | equal; trial, below |
-| 2026-10-09 | `daily_metrics` | per-month output | DIFFERS, stopped at 2017-07, below |
+| 2026-10-09 | `daily_metrics` | per-month output, then direct queries | DIFFERS: mixed, new not strictly better; below |
 | 2026-10-09 | `xrp_stacks` 2013-02 .. 2026-09-03 | per-month output, `nonce_rank` key | equal until 2025-06-17, then old lost blocks; below |
 | 2026-10-09 | `xrp_stacks`, full | consumers' key | running |
 
@@ -192,9 +194,40 @@ Not checked: months skipped, invariants not run, open questions (e.g. backfill e
   independently: a checksum of the key columns is identical on both sides; on a 1/50 sample, 25 of 5.3M `amount`s
   differ, all by 1 ULP (2.2e-16 relative).
 
-**`daily_metrics_v2` vs `_experimental`, 2026-10-09:** 18 assets; 1,666 (asset, metric) groups only in old (not
-part of the run), none only in new. Equal 2009-01 .. 2017-06. Stopped at 2017-07: 108,760 `missing_in_old`, i.e.
-experimental has 2017-07-12..31 for 5,438 groups that old lacks, often with value 0.
+**`daily_metrics_v2` vs `_experimental`, 2026-10-09:** 18 Optimism assets (`o-*`), 430 common metrics; 1,666
+groups only in old (not part of the run). `compare.py` stopped at 2017-07 (108,760 `missing_in_old`); the whole
+range was then aggregated with direct queries (scratchpad, not kept): equal 7.10M, `differs` 4.47M (3.79M > 1%),
+`missing_in_old` 7.16M (6.69M zero), `missing_in_new` 213k (51k non-zero). Causes, by confidence:
+- **Zero padding (benign):** new has zeros 2017-07-12 .. 2020-04, old 2021-02 .. 2021-10; no chain data before
+  2021-11. Exception: ~2.4k non-zero `mvrv_z` / `std_dev_marketcap_usd` in new before the chain existed.
+- **Old has gaps, new right:** 2024-02-26..28 for every asset (source `opt_erc20_transfers` has them; carried a year
+  further by 1y-lookback holder metrics); o-wrapped-bitcoin 2025-07-23 .. 2026-06-17.
+- **Contract switch, not data:** o-usd-coin, o-velodrome-finance, o-lyra-finance, o-aave differ until exactly
+  2025-07-22; old used the earlier contracts (USDC.e, VELO v1), new today's contract for all history.
+- **o-aave broken in both (new entirely):** `asset_metadata.asset_ref_id` 5802947053947896739 ≠
+  `cityHash64('OPT_' || contract)` = 22850480597297386, under which the source rows are. o-veloce-vext reuses
+  `veloce-vext`'s ref; its contract has no source rows.
+- **New's P/L family is broken (proven):** in `distribution_deltas_5min_experimental`, coins acquired in the month
+  they move (88–97% of moved rows) carry the previous month's last 5-min price as `acquisition_price`; outflow and
+  inflow then cancel, so `transaction_volume_profit` + `_loss` is ~0.4% of volume (old 5–68%), with negative loss
+  sums. Cause: the seam (`age_distribution_5min_delta`) declared no `dependsOn: price_usd`; in experimental runs its
+  ASOF price table is `intraday_metrics_experimental`, and each month's seam was written ~1 min before that month's
+  prices. The ASOF join itself (PR #2132, `d678ad9a`) is right. Fix: `dependsOn` added, commit `0cd7ac1b` on
+  `seamDependsOnPrice` in `clickhouse-tables` (job sort checked: prices now precede the seam). Also affects
+  network P/L and `stack_price_consumed` (not checked separately). The unmerged `validate_price_coverage`
+  (`origin/priceValidation`, `29c2d2c5`) would have caught it.
+- **Launch month (medium):** new lacks USD stack metrics for a token's first days, then bad values
+  (o-walletconnect-token: `mvrv_usd_30d` 37.9 on 2025-05-01, negative `stack_mean_age_dollar_days` on 462 days);
+  likely the same ordering. Old's values there are plausible.
+- **Where old is worse:** realized price / MVRV (OP 2026-09-15 at $0.099: `mean_realized_price_usd_30d` new 0.089,
+  old 0.44); old has impossible values (negative and 33.7M-day `stack_mean_age_days`, `stack_liveliness` > 1,
+  `percent_of_total_supply_in_profit` > 100).
+- **Unexplained:** ~1M non-trivial `differs` before 2024-02-26 on the 13 assets without a contract switch, in
+  balance/stack-based metrics, while transfer metrics are equal. `total_supply` matches neither side to the source
+  (one 2^32 mint, ~8k OP burned; both tables grow above 2^32 from 2024).
+- Source notes: `opt_erc20_stacks` keeps supply on a `mint` pseudo-address as a negative stack with
+  `odt = 1970-01-01`; the prod seam has `acquisition_price` NULL for all OP rows before 2025. Source nearly empty on
+  2024-02-24/25, 2025-01-12, 2025-02-01 (shared by both sides; outage or ingestion gap not checked).
 
 **`xrp_stacks` per-month run, `nonce_rank` key, 2026-10-09:** every month equal up to 2025-05, and 2025-06-01..16.
 2025-06: 2.31M `differs`, 159k `missing_in_new`, 294k `missing_in_old`; every later month still differs.
@@ -220,7 +253,10 @@ experimental has 2017-07-12..31 for 5,438 groups that old lacks, often with valu
 
 ## Open
 
-- `daily_metrics`: why experimental starts 5,438 metrics at 2017-07-12 where old has nothing.
+- `daily_metrics`: PR for `seamDependsOnPrice`; re-run the optERC20 experimental run with it, then compare again
+  (P/L family, launch months). Fix o-aave's `asset_ref_id`. Explain the pre-2024 balance/stack `differs` and
+  `total_supply`.
+- `daily_metrics`: `compare.py` stops at the zero padding; consider a zero-tolerant category or `--max-failing-keys`.
 - An HTML page for the results: daily stacked bars per category, a year → month → day table.
 - Full `xrp_balances` run.
 - Stacks: results of the re-run with the consumers' key.
