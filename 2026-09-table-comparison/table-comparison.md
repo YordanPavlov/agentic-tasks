@@ -1,9 +1,9 @@
 # Comparing an old and a new version of a table (runbook)
 
 **Started:** 2026-09-30
-**Status:** Per-month output (`scripts/`, described in `scripts/README.md`), implemented 2026-10-09. Full
-`xrp_stacks` run: equal through 2025-06-16; the June 2025 differences are blocks lost by old (see "Runs").
-2025-07 onwards is running (2026-10-09).
+**Status:** Per-month output (`scripts/`, described in `scripts/README.md`), implemented 2026-10-09; stacks are
+compared by the consumers' key since then. `xrp_stacks`: equal through 2025-06-16; everything after traces back to
+old losing blocks in June 2025 (see "Runs"). A full re-run with the consumers' key is running (2026-10-09).
 **Origin:** [`2026-09-rerun-comparison-framework`](../2026-09-rerun-comparison-framework/rerun-comparison-framework.md)
 has the development history and the first XRP balances results.
 
@@ -20,8 +20,8 @@ Ground rules:
 - **The full dataset, not samples.** Aim for ~1 h per comparison, 2 h at most.
 - **Prod is read-only.** At most **2 long-running queries** at a time; small probes alongside are fine.
 - **Leave the live tail out.** Set the cutoff a few days back: recent data is still being written.
-- **One value per table,** compared with a 1e-9 relative tolerance. Every other column that matters is key and
-  must match exactly, including columns the pipeline computes (stacks compares `nonce_rank`, see the README).
+- **One value per table,** summed per key and compared with a 1e-9 relative tolerance. The key is what consumers
+  aggregate by; it must match exactly. Columns that only tell rows apart (e.g. stacks `nonce`) stay out of it.
 - **Stop early.** Many differences in the early years mean the new run needs a look before the rest is compared.
 
 ## The tool
@@ -37,14 +37,18 @@ Reading the categories:
 | `equal` | OK |
 | `differs` | list the keys of the cell with the window's query (see the README), then look at the rows |
 | `missing_in_new` / `missing_in_old` | lost in new / added in new (e.g. recovered data), or a key column that differs: then they come in equal numbers on the same days |
-| `old_multi` / `new_multi` | the configured key is coarser than that table's sorting key (see "Key changes") |
 
 ### Design decisions (2026-10-09)
 
 The previous version kept up to 10,000 key hashes per category for drill-down; the full stacks run left a 36 GB
 cache that `summary.py` could not load, and its results were spread over key ranges, not dates.
 - **One value column.** A key that doesn't match and a value that differs need the same investigation, so every
-  other column is key. Balances `old*` columns are checked as invariants instead (below).
+  other column that matters is key. Balances `old*` columns are checked as invariants instead (below).
+- **The consumers' key, value summed.** Stacks are keyed `(contractAddress, address, sign, assetRefId, dt, odt)`,
+  as `daily_metrics/job_functions/xrp_stacks.py` aggregates them; `nonce`, block and tx are left out. Keying on a
+  rank of `nonce` turned one extra stack in a 2.44M-stack sweep into 2.43M missing keys per side (2026-05-31).
+  This dropped the per-table sources and the `*_multi` categories. A coarser key needs all its rows on one shard
+  (true for stacks: checked on 2025-07-15).
 - **Actual keys, no hashes.** Costs ~50% more memory per window. Example keys were dropped from the output
   (2026-10-09): they complicated the query, and a cell's keys can be listed with the window's query.
 - **No fingerprints.** A month file records the config and when it ran; after a change, re-run with `--force`.
@@ -86,7 +90,7 @@ cache that `summary.py` could not load, and its results were spread over key ran
 When the two tables have different sorting keys, each side's ReplacingMergeTree has deduplicated by its own key.
 Rows that are distinct under one key can have been merged away under the other.
 - Choose the key to compare by explicitly. For XRP stacks, old uses `(…, dt, nonce)` and new `(…, blockNumber,
-  nonce)`. The config's key holds both `blockNumber` and `dt` (with `nonce_rank` in place of `nonce`).
+  nonce)`; the consumers' key holds neither, so only what `FINAL` merges away on each side can differ.
 - To size the effect, run a second config with the other key and compare the summaries. A difference that
   disappears under the other key comes from the key change, not the data. Which key is right is a design question
   for the table's owner.
@@ -155,7 +159,8 @@ Not checked: months skipped, invariants not run, open questions (e.g. backfill e
 | 2026-10-07 | `xrp_stacks` 2013-01 .. 2026-09-03, full | key-range windows (314) | DIFFERS, below |
 | 2026-10-09 | `xrp_stacks` 2013-02..06, 2024-01 | per-month output | equal; trial, below |
 | 2026-10-09 | `daily_metrics` | per-month output | DIFFERS, stopped at 2017-07, below |
-| 2026-10-09 | `xrp_stacks` 2013-02 .. 2025-06 | per-month output | equal until 2025-06-17, then old lost blocks; below |
+| 2026-10-09 | `xrp_stacks` 2013-02 .. 2026-09-03 | per-month output, `nonce_rank` key | equal until 2025-06-17, then old lost blocks; below |
+| 2026-10-09 | `xrp_stacks`, full | consumers' key | running |
 
 **Validation, 2026-10-02:**
 - Key and row counts match `uniqExact` / `count()` on the Distributed tables exactly (stacks 2013-03, balances
@@ -191,25 +196,34 @@ Not checked: months skipped, invariants not run, open questions (e.g. backfill e
 part of the run), none only in new. Equal 2009-01 .. 2017-06. Stopped at 2017-07: 108,760 `missing_in_old`, i.e.
 experimental has 2017-07-12..31 for 5,438 groups that old lacks, often with value 0.
 
-**`xrp_stacks` per-month run, 2013-02 .. 2025-06, 2026-10-09:** every month equal up to 2025-05, and
-2025-06-01..16. Stopped after 2025-06 (early stop): 2.31M `differs`, 159k `missing_in_new`, 294k `missing_in_old`.
+**`xrp_stacks` per-month run, `nonce_rank` key, 2026-10-09:** every month equal up to 2025-05, and 2025-06-01..16.
+2025-06: 2.31M `differs`, 159k `missing_in_new`, 294k `missing_in_old`; every later month still differs.
 - **Cause: old (`_v8`, written live from `xrp_stacks_v6`) has no rows for 5 block ranges**, which new has:
   96867745–96867916 and 96868120–121 (06-17, 50.9k rows), 97066419–97066618 and 97066622–631 (06-26, 55.2k),
   97154619–97154718 (06-30, 29.4k). These add up to new's +135,131 rows exactly.
 - The live `xrp_balances_shard_v8` has the three large ranges (same rows as `_v10`), so the source had them and
   only the old stacks pipeline dropped them. It lacks the 12 blocks of the two small ranges too: probably a short
   upstream gap at the time, which `_v10` recovered.
-- The `differs` are knock-on: ~420 addresses with different stack rows, all but 2 (83 rows) in the lost blocks,
-  heavy (~53M rows over 06-17..30). Their net flow outside the lost blocks is equal (within float noise); only the
-  stack splits and `odt` differ. The other ~657k active addresses are equal.
-- Verdict for this period: new is right; old is missing data.
+- **Large ranges: only the output was lost.** Old's later rows spend stacks born inside them (gap C: the same
+  counts as new in June and July), and addresses only in them are equal from 2025-07 (0 of 4,909).
+- **Small ranges (12 blocks): never reached the job,** so old's Flink state for their addresses is wrong from then
+  on. ~420 heavy addresses differ in June; in 2025-07..10, 323 → 82 of the addresses in both kinds of range and
+  39 → 15 of those only in small ones, plus 6–10 others (likely `odt` inherited through transfers; not verified).
+- Their stacks carry amounts a few drops off (`differs` on the same key); net flow per address is equal. The
+  missing keys pair up with `missing_in_old` (another split or `odt`); on 2025-07-01..07 only 7 txs are in old
+  alone, all leftover dust stacks of the wrong state.
+- **2026-05-31: same incident, surfacing late.** At 12:12:12, tx `384C54B2…` (block 104604271) sweeps 2.44M dust
+  stacks of `rTLdxcBkCUeNR1rJc7KVz3uqchfR73hpF`. On 2025-07-15 old, short by ~0.0096 XRP for that address, had
+  spent 6 stacks of 2025-05-10 that new kept; in the sweep new spends them, shifting every later `nonce_rank`:
+  2.43M missing keys per side. With the consumers' key: 4 and 10.
+- Verdict: new is right; old lost blocks and, for the small ranges, has a corrupted state since.
 
 ## Open
 
-- Full `xrp_stacks` run with the per-month output.
 - `daily_metrics`: why experimental starts 5,438 metrics at 2017-07-12 where old has nothing.
 - An HTML page for the results: daily stacked bars per category, a year → month → day table.
 - Full `xrp_balances` run.
-- Stacks: results of 2025-07 onwards (running): further lost blocks in old? the 2026-05-31 differences?
-- Stacks: the 2 addresses outside the lost blocks with different rows (83 rows) in 2025-06.
+- Stacks: results of the re-run with the consumers' key.
+- Stacks: 2025-12, new has 7,268 rows more (`missing_in_old` 7,477): more blocks lost by old?
+- Stacks: the few addresses outside the lost blocks that differ (2 in 2025-06, 6–10 per month after).
 - Script the invariants, starting with the balance chain.
