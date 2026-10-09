@@ -1,8 +1,9 @@
 # Comparing an old and a new version of a table (runbook)
 
 **Started:** 2026-09-30
-**Status:** Per-month output (`scripts/`, described in `scripts/README.md`), implemented 2026-10-09; trial on
-stacks 2024-01 and a first `daily_metrics` run done (see "Runs"). Next: a full `xrp_stacks` run.
+**Status:** Per-month output (`scripts/`, described in `scripts/README.md`), implemented 2026-10-09. Full
+`xrp_stacks` run: equal through 2025-06-16; the June 2025 differences are blocks lost by old (see "Runs").
+2025-07 onwards is running (2026-10-09).
 **Origin:** [`2026-09-rerun-comparison-framework`](../2026-09-rerun-comparison-framework/rerun-comparison-framework.md)
 has the development history and the first XRP balances results.
 
@@ -154,6 +155,7 @@ Not checked: months skipped, invariants not run, open questions (e.g. backfill e
 | 2026-10-07 | `xrp_stacks` 2013-01 .. 2026-09-03, full | key-range windows (314) | DIFFERS, below |
 | 2026-10-09 | `xrp_stacks` 2013-02..06, 2024-01 | per-month output | equal; trial, below |
 | 2026-10-09 | `daily_metrics` | per-month output | DIFFERS, stopped at 2017-07, below |
+| 2026-10-09 | `xrp_stacks` 2013-02 .. 2025-06 | per-month output | equal until 2025-06-17, then old lost blocks; below |
 
 **Validation, 2026-10-02:**
 - Key and row counts match `uniqExact` / `count()` on the Distributed tables exactly (stacks 2013-03, balances
@@ -189,11 +191,25 @@ Not checked: months skipped, invariants not run, open questions (e.g. backfill e
 part of the run), none only in new. Equal 2009-01 .. 2017-06. Stopped at 2017-07: 108,760 `missing_in_old`, i.e.
 experimental has 2017-07-12..31 for 5,438 groups that old lacks, often with value 0.
 
+**`xrp_stacks` per-month run, 2013-02 .. 2025-06, 2026-10-09:** every month equal up to 2025-05, and
+2025-06-01..16. Stopped after 2025-06 (early stop): 2.31M `differs`, 159k `missing_in_new`, 294k `missing_in_old`.
+- **Cause: old (`_v8`, written live from `xrp_stacks_v6`) has no rows for 5 block ranges**, which new has:
+  96867745–96867916 and 96868120–121 (06-17, 50.9k rows), 97066419–97066618 and 97066622–631 (06-26, 55.2k),
+  97154619–97154718 (06-30, 29.4k). These add up to new's +135,131 rows exactly.
+- The live `xrp_balances_shard_v8` has the three large ranges (same rows as `_v10`), so the source had them and
+  only the old stacks pipeline dropped them. It lacks the 12 blocks of the two small ranges too: probably a short
+  upstream gap at the time, which `_v10` recovered.
+- The `differs` are knock-on: ~420 addresses with different stack rows, all but 2 (83 rows) in the lost blocks,
+  heavy (~53M rows over 06-17..30). Their net flow outside the lost blocks is equal (within float noise); only the
+  stack splits and `odt` differ. The other ~657k active addresses are equal.
+- Verdict for this period: new is right; old is missing data.
+
 ## Open
 
 - Full `xrp_stacks` run with the per-month output.
 - `daily_metrics`: why experimental starts 5,438 metrics at 2017-07-12 where old has nothing.
 - An HTML page for the results: daily stacked bars per category, a year → month → day table.
 - Full `xrp_balances` run.
-- Stacks: explain the 2026-05-31 `value_diff`s and the 2025-06..08 `float_diff`s.
+- Stacks: results of 2025-07 onwards (running): further lost blocks in old? the 2026-05-31 differences?
+- Stacks: the 2 addresses outside the lost blocks with different rows (83 rows) in 2025-06.
 - Script the invariants, starting with the balance chain.
