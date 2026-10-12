@@ -24,17 +24,14 @@ from `system.tables`. Each partition is cut into **windows**, ranges of the `buc
 
 ### The comparison query
 
-`sql/compare.sql` is meant to be read; its header lists every `$placeholder`. For one window it:
+`sql/compare.sql` is the main comparison query; its header lists the `$placeholder`s, which are filled in per
+window. For one window it:
 1. reads the rows of both sides with `FINAL`, i.e. as consumers see them: for each sorting key, the latest
    inserted row (or the highest version). Unmerged copies are not differences.
 2. groups them by the key columns, so the old and new rows of a key land in one row, sums each side's values, and
    gives the key a category and the relative difference |new − old| / max(|old|, |new|),
 3. counts the keys per category and **cell**: the `group_by` columns and the day. Equal keys are counted per
    month only. Per cell it also keeps the largest difference.
-
-`compare.py <config> --print-sql <partition> <window>` prints the filled-in query of one window (it cuts the
-partition first, which takes seconds). To list the failing keys of a cell, replace its outer `SELECT … GROUP BY
-category, cell` with `SELECT * … WHERE category = 'differs' AND cell = [...] LIMIT 10`.
 
 ### Where it runs
 
@@ -79,12 +76,17 @@ its keys in memory, ~10.5 GiB per shard at 20M rows of stacks. Lower it if a win
 
 Run from this directory. `<config>` is a key of `CONFIGS` in `configs.py`.
 
-1. Add a config to `configs.py`: the local tables, cluster, keys, value, buckets, start and cutoff.
-2. `python3 compare.py <config> <YYYY-MM>`: one heavy month. Its time, times the number of comparable months,
-   halved for 2 in parallel, estimates the run.
-3. `nohup python3 compare.py <config> > compare.log 2>&1 &`: all partitions, one line per month.
-4. `python3 summary.py <config>`: coverage, failing months, the failing groups (or days) of the first failing
+0. Add a config to `configs.py`: the local tables, cluster, keys, value, buckets, start and cutoff.
+1. `python3 compare.py <config> <YYYY-MM>`: a trial on one heavy month. It checks the config and writes that
+   month's file; its time, times the number of months, is an upper bound for the full run.
+2. `python3 compare.py <config>`: all partitions, one line per month. For a long run:
+   `nohup python3 compare.py <config> > compare.log 2>&1 &`.
+3. `python3 summary.py <config>`: coverage, failing months, the failing groups (or days) of the first failing
    month, keys per category and the verdict.
+
+`compare.py <config> --print-sql <partition> <window>` prints the filled-in query of one window (it cuts the
+partition first, which takes seconds). To list the failing keys of a cell, replace its outer `SELECT … GROUP BY
+category, cell` with `SELECT * … WHERE category = 'differs' AND cell = [...] LIMIT 10`.
 
 Partitions run in date order, `--parallel` window queries at a time (default 2). A month's file is written once its
 partition is done, so an interrupted run resumes with the first unfinished partition.
