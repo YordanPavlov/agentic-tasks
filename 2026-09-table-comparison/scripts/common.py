@@ -1,5 +1,5 @@
 """Shared pieces of the old-vs-new table comparison: ClickHouse access, SQL generation from the templates in sql/,
-the periods and windows, and the result files. README.md describes the method.
+the partitions and windows, and the result files. README.md describes the method.
 """
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ def load_config(name: str) -> Config:
     return CONFIGS[name]
 
 
-# ---------- periods ----------
+# ---------- partitions ----------
 
 def next_month(day: str) -> str:
     """The first day of the month after day's."""
@@ -83,9 +83,9 @@ def months(start: str, end: str) -> list[str]:
 
 
 @dataclass(frozen=True)
-class Period:
-    """A time range that is cut into windows and compared on its own: a month, or the whole range ('all') for a
-    table that is not partitioned by month."""
+class Partition:
+    """A ClickHouse partition of both tables, limited to [start, cutoff): it is cut into windows and compared on
+    its own. A month ('YYYY-MM'), or the whole range ('all') for unpartitioned tables."""
     name: str
     start: str
     end: str
@@ -95,11 +95,17 @@ class Period:
         return months(self.start, self.end)
 
 
-def periods(config: Config) -> list[Period]:
-    if not config.monthly:
-        return [Period('all', config.start, config.cutoff)]
-    return [Period(month, max(f'{month}-01', config.start), min(next_month(f'{month}-01'), config.cutoff))
-            for month in months(config.start, config.cutoff)]
+def partitions(config: Config) -> list[Partition]:
+    """The partitions of the tables, as their partition keys tell. Other partition keys fail: a time filter that
+    doesn't match the partitions reads the same granules once per filter."""
+    keys = {table: run_query(f"SELECT partition_key FROM system.tables WHERE database || '.' || name = '{table}'")
+            .strip() for table in (config.old, config.new)}
+    if all(key == '' for key in keys.values()):
+        return [Partition('all', config.start, config.cutoff)]
+    if all(re.fullmatch(rf'(toYYYYMM|toStartOfMonth)\({config.dt}\)', key) for key in keys.values()):
+        return [Partition(month, max(f'{month}-01', config.start), min(next_month(f'{month}-01'), config.cutoff))
+                for month in months(config.start, config.cutoff)]
+    raise SystemExit(f'unsupported partition keys: {keys}; supported: none, or monthly on {config.dt}')
 
 
 # ---------- SQL generation ----------
@@ -135,15 +141,15 @@ def table_values(config: Config, start: str, end: str, common_groups: bool = Tru
                 new_where=side_where(config, 'new', common_groups))
 
 
-def compare_sql(config: Config, period: Period, key_range: str) -> str:
+def compare_sql(config: Config, partition: Partition, key_range: str) -> str:
     return from_template('compare.sql', config, dict(
-        **table_values(config, period.start, period.end), key_range=key_range,
+        **table_values(config, partition.start, partition.end), key_range=key_range,
         keys=', '.join(config.keys), value=config.value, tolerance=repr(FLOAT_TOLERANCE),
         group_cells=''.join(f'toString({column}), ' for column in config.group_by)))
 
 
 # ---------- windows ----------
-# Each period is cut into ranges of the bucket columns ("windows"), so each query holds a bounded number of keys and
+# Each partition is cut into ranges of the bucket columns ("windows"), so each query holds a bounded number of keys and
 # the primary index limits what it reads. cuts.sql cuts them from exact row counts.
 
 @lru_cache(maxsize=None)
@@ -180,18 +186,18 @@ def key_order(names: list[str], literals: list[str], strict: str, last: str) -> 
 
 
 @dataclass(frozen=True)
-class Cuts:
-    """A period cut into windows, and its rows per side as FINAL shows them."""
+class Windows:
+    """A partition cut into windows, and its rows per side as FINAL shows them."""
     old_rows: int
     new_rows: int
     key_ranges: list[str]  # one SQL condition per window
 
 
-def cut(config: Config, period: Period) -> Cuts:
+def cut_partition_into_windows(config: Config, partition: Partition) -> Windows:
     buckets = list(config.buckets)
     types = column_types(config.new)
     counts = from_template('counts.sql', config, dict(
-        **table_values(config, period.start, period.end), buckets=', '.join(buckets),
+        **table_values(config, partition.start, partition.end), buckets=', '.join(buckets),
         bucket_literals=f"[{', '.join(literal_sql(column, types[column]) for column in buckets)}]"))
     sql = TEMPLATES['cuts.sql'].substitute(
         counts=counts, buckets=', '.join(buckets), window_rows=str(WINDOW_ROWS * shard_count(config)))
@@ -205,7 +211,7 @@ def cut(config: Config, period: Period) -> Cuts:
         if upper is not None:
             conditions.append(key_order(buckets, upper, '<', '<'))
         key_ranges.append(' AND '.join(conditions) or '1')
-    return Cuts(old_rows=int(row['old_rows']), new_rows=int(row['new_rows']), key_ranges=key_ranges)
+    return Windows(old_rows=int(row['old_rows']), new_rows=int(row['new_rows']), key_ranges=key_ranges)
 
 
 def coverage(config: Config) -> dict[str, list[dict[str, Any]]]:
@@ -239,7 +245,7 @@ class Month(TypedDict):
     a cell holds the keys per failing category, and max_diff_pct for 'differs'."""
     month: str
     config: dict[str, object]
-    period: dict[str, object]  # the period the month was compared in: name, windows, started, finished (UTC)
+    partition: dict[str, object]  # the partition the month was compared in: name, windows, started, finished (UTC)
     rows: dict[str, int]       # old, new: as FINAL shows them
     keys: dict[str, int]       # per category
     deviations: dict[str, Any]

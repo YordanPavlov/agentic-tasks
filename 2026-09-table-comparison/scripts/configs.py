@@ -12,8 +12,6 @@ Fields of Config:
                tolerance.
   buckets      Key columns the key space is cut on into windows, a prefix of both sorting keys. A bucket is never
                split, so it should hold far fewer rows than a window.
-  monthly      True if the tables are partitioned by month: each month is cut and compared on its own. False
-               cuts the whole range at once.
   group_by     Key columns the output is broken down by, before the day, e.g. asset and metric.
   common_groups_only  Compare only the group_by groups present on both sides; the others go to coverage.json.
   start, cutoff  'YYYY-MM-DD'; cutoff is exclusive. Leave the live tail out: it is still being written.
@@ -35,7 +33,6 @@ class Config:
     buckets: tuple[str, ...]
     start: str
     cutoff: str
-    monthly: bool = True
     group_by: tuple[str, ...] = ()
     common_groups_only: bool = False
     where: str = '1'
@@ -62,7 +59,7 @@ CONFIGS: dict[str, Config] = {
         old='default.daily_metrics_v2', new='default.daily_metrics_v2_experimental', cluster=None,
         dt='dt',
         keys=('asset_id', 'metric_id', 'dt'),
-        value='value', buckets=('asset_id', 'metric_id'), monthly=False,
+        value='value', buckets=('asset_id', 'metric_id'),
         group_by=('asset_id', 'metric_id'), common_groups_only=True,
         where='asset_id IN (SELECT DISTINCT asset_id FROM default.daily_metrics_v2_experimental)',
         start='2009-01-01', cutoff='2026-10-04'),
