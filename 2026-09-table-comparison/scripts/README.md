@@ -31,7 +31,8 @@ window. For one window it:
 2. groups them by the key columns, so the old and new rows of a key land in one row, sums each side's values, and
    gives the key a category and the relative difference |new − old| / max(|old|, |new|),
 3. counts the keys per category and **cell**: the `group_by` columns and the day. Equal keys are counted per
-   month only. Per cell it also keeps the largest difference.
+   month only. Per cell it also counts the missing keys whose value is 0, and the differences by size
+   (`--float-max`, `--small-max`) and direction.
 
 ### Where it runs
 
@@ -52,18 +53,13 @@ complete: days missing on one side are failures.
 ## Output
 
 Under `results/<config>/`, pretty-printed JSON:
-- `YYYY/YYYY-MM.json`, one per month:
-  - `config`: what was compared (tables, keys, value, `group_by`, tolerance, filters)
-  - `partition`: the partition the month was compared in, its number of `windows`, and when it `started` and
-    `finished` (UTC wall clock; partitions overlap with `--parallel`)
-  - `rows`: rows per side as `FINAL` shows them; `keys`: keys per category
-  - `deviations`: the failing cells only, nested by the `group_by` values, then the day; one line per cell. A cell
-    holds the keys per failing category, and `max_diff_pct` for `differs`.
+- `YYYY/YYYY-MM.json`, one per month: what was compared, rows and keys per category, and the failing keys per day
+  (`days`) and, with `group_by`, per group (`groups`).
 - `coverage.json`: the groups present on one side only (configs with `group_by`).
 
-A month whose file exists is done, and a restart skips it. After a change to the data, the config or the SQL,
-use `--force` (or delete `results/<config>/`): the files don't record which version of the SQL made them. A run
-reads the SQL templates once, at start.
+A month whose file exists is done, and a restart skips it. After a change to the data, the config, the SQL or the
+thresholds, use `--force` (or delete `results/<config>/`): the files don't record which version of the SQL made
+them. A run reads the SQL templates once, at start.
 
 ## Prerequisites
 

@@ -1,5 +1,6 @@
 -- Compares one window (a time range and a key range) of old and new key by key, and counts the keys per category
--- and cell. A cell is a group (config.group_by) and day; equal keys are only counted per month.
+-- and cell, split by the size of their difference. A cell is a group (config.group_by) and day; equal keys are
+-- only counted per month.
 -- Runs on one shard against its local tables, or on the connected broker for a fully replicated table.
 --
 -- Placeholders, filled in by common.py from the config:
@@ -10,15 +11,19 @@
 --   keys                         the key columns
 --   value                        the value column
 --   tolerance                    relative tolerance: a smaller difference is equal
+--   float_max, small_max         the largest relative differences counted as 'float' and 'small'; larger is 'large'
 --   group_cells                  the group_by columns as strings, each followed by a comma; empty without group_by
 --
 -- Read it from the innermost layer outwards:
 --   1. the rows of both sides, each with its side
 --   2. GROUP BY the key puts the old and new rows of a key into one row, which gets a category
---   3. keys are counted per category and cell
+--   3. keys are counted per category, cell and kind of difference
 SELECT
     category,
     cell,
+    is_zero,
+    diff_class,
+    new_gt_old,
     count() AS keys,
     sum(old_rows) AS old_row_count,
     sum(new_rows) AS new_row_count,
@@ -42,7 +47,16 @@ FROM
                                     'differs') AS category,
         if(category = 'equal',
            [toString(toStartOfMonth(min(cmp_day)))],
-           [${group_cells}toString(min(cmp_day))]) AS cell
+           [${group_cells}toString(min(cmp_day))]) AS cell,
+        -- a missing key with value 0, e.g. padding
+        multiIf(category = 'missing_in_new', old_value = 0,
+                category = 'missing_in_old', new_value = 0,
+                                             0) AS is_zero,
+        multiIf(category != 'differs', '',
+                diff <= $float_max,    'float',
+                diff <= $small_max,    'small',
+                                       'large') AS diff_class,
+        category = 'differs' AND new_value > old_value AS new_gt_old
     FROM
     (
         -- 1. Both sides with FINAL: what consumers see, i.e. the latest inserted row per sorting key (or the
@@ -57,4 +71,4 @@ FROM
     )
     GROUP BY $keys
 )
-GROUP BY category, cell
+GROUP BY category, cell, is_zero, diff_class, new_gt_old

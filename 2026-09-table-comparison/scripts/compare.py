@@ -3,12 +3,14 @@ unpartitioned tables) is cut into windows of about equal rows; one query per win
 and categorizes every key. Each month's result goes to results/<config>/YYYY/YYYY-MM.json once its partition is
 done, so an interrupted run resumes with the first unfinished partition.
 
-usage: compare.py <config> [PARTITION ...] [--parallel N] [--max-failing-keys N] [--force]
-                  [--print-sql PARTITION WINDOW]
+usage: compare.py <config> [PARTITION ...] [--parallel N] [--max-failing-keys N] [--float-max X] [--small-max X]
+                  [--force] [--print-sql PARTITION WINDOW]
   PARTITION     only these partitions: YYYY-MM, or 'all' for unpartitioned tables (default: all partitions)
   --parallel N  queries in flight at once (default 2, the limit for long queries on prod)
   --max-failing-keys N  stop after the month in which the failing keys of all months pass N (default 100,000):
                 the new table needs a closer look first
+  --float-max X, --small-max X  the largest relative differences of 'differs' counted as 'float' (default 1e-6)
+                and 'small' (default 0.01); larger ones are 'large'. A change needs --force
   --force       re-run partitions that already have results: after the data, the config or the SQL changed
   --print-sql   print the query of one window of one partition and exit
 """
@@ -23,9 +25,9 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from typing import Any
 
-from common import (CATEGORIES, Month, Partition, Windows, compare_sql, coverage, coverage_path,
-                    cut_partition_into_windows, describe, failing_keys, is_cell, load_config, load_json, month_path,
-                    months, partitions, run_query_json, write_json)
+from common import (CATEGORIES, DIFF_CLASSES, Month, Partition, Thresholds, Windows, compare_sql, coverage,
+                    coverage_path, cut_partition_into_windows, day_ranges, describe, failing_keys, is_cell,
+                    load_config, load_json, month_path, months, partitions, run_query_json, write_json)
 from configs import Config
 
 WindowResult = tuple[list[dict[str, Any]], str]  # compare.sql's rows, the time the query finished
@@ -35,58 +37,83 @@ def now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
 
 
-def run_window(config: Config, partition: Partition, key_range: str) -> WindowResult:
-    return run_query_json(compare_sql(config, partition, key_range), timeout_s=7200), now()
+def run_window(config: Config, partition: Partition, key_range: str, thresholds: Thresholds) -> WindowResult:
+    return run_query_json(compare_sql(config, partition, key_range, thresholds), timeout_s=7200), now()
 
 
 def add_to_cell(cell: dict[str, Any], row: dict[str, Any]) -> None:
-    """Adds one row of compare.sql (one category of a cell, from one window and shard) to the cell."""
+    """Adds one row of compare.sql to the cell."""
     category = row['category']
-    cell[category] = cell.get(category, 0) + row['keys']
-    if category == 'differs' and row['max_diff'] is not None:
-        cell['max_diff_pct'] = max(cell.get('max_diff_pct', 0.0), float(f"{row['max_diff'] * 100:.3g}"))
+    if category == 'differs':
+        stats = cell.setdefault(category, {'keys': 0, **{name: 0 for name in DIFF_CLASSES}, 'new_gt_old': 0,
+                                           'max_diff_pct': 0.0})
+        stats[row['diff_class']] += row['keys']
+        stats['new_gt_old'] += row['keys'] if row['new_gt_old'] else 0
+        if row['max_diff'] is not None:
+            stats['max_diff_pct'] = max(stats['max_diff_pct'], float(f"{row['max_diff'] * 100:.3g}"))
+    else:
+        stats = cell.setdefault(category, {'keys': 0, 'zero': 0})
+        stats['zero'] += row['keys'] if row['is_zero'] else 0
+    stats['keys'] += row['keys']
+
+
+def order(key: str) -> tuple[int, int | str]:
+    """Sort order of group values and days: numbers by value."""
+    return (0, int(key)) if key.isdigit() else (1, key)
 
 
 def sorted_tree(node: dict[str, Any]) -> dict[str, Any]:
-    """The nested deviations sorted by key, numbers by value: groups such as asset ids, then days."""
-    def order(key: str) -> tuple[int, int | str]:
-        return (0, int(key)) if key.isdigit() else (1, key)
-    if is_cell(node):  # categories in a fixed order, then max_diff_pct
-        return {field: node[field] for field in (*CATEGORIES, 'max_diff_pct') if field in node}
+    """Days or nested groups sorted by key, a cell's categories in a fixed order."""
+    if is_cell(node):
+        return {category: node[category] for category in CATEGORIES if category in node}
     return {key: sorted_tree(node[key]) for key in sorted(node, key=order)}
 
 
-def build_months(config: Config, partition: Partition, started: str, windows: Windows,
+def build_months(config: Config, thresholds: Thresholds, partition: Partition, started: str, windows: Windows,
                  results: list[WindowResult]) -> list[Month]:
     """The month files of a finished partition. Fails if the windows' rows don't add up to the partition's
     counts."""
     finished = max(finished for _, finished in results)
-    months = {month: Month(month=month, config=describe(config),
+    months = {month: Month(month=month, config=describe(config, thresholds),
                            partition=dict(name=partition.name, windows=len(results), started=started,
                                           finished=finished),
-                           rows={'old': 0, 'new': 0}, keys={}, deviations={})
+                           rows={'old': 0, 'new': 0}, keys={}, days={})
               for month in partition.months}
+    groups: dict[str, dict[tuple[str, ...], dict[str, Any]]] = {month: {} for month in partition.months}
+    group_days: dict[tuple[str, tuple[str, ...], str], set[str]] = {}  # (month, group, category) -> days
     for rows, _ in results:
         for row in rows:
             cell_path = [str(part) for part in row['cell']]  # group values and day, or the month for equal keys
-            month = months[cell_path[-1][:7]]
+            day = cell_path[-1]
+            month = months[day[:7]]
             month['rows']['old'] += row['old_row_count']
             month['rows']['new'] += row['new_row_count']
             month['keys'][row['category']] = month['keys'].get(row['category'], 0) + row['keys']
             if row['category'] == 'equal':
                 continue
-            node = month['deviations']
-            for part in cell_path:
-                node = node.setdefault(part, {})
-            add_to_cell(node, row)
+            add_to_cell(month['days'].setdefault(day, {}), row)
+            if config.group_by:
+                group = tuple(cell_path[:-1])
+                add_to_cell(groups[day[:7]].setdefault(group, {}), row)
+                group_days.setdefault((day[:7], group, row['category']), set()).add(day)
     old_rows = sum(month['rows']['old'] for month in months.values())
     new_rows = sum(month['rows']['new'] for month in months.values())
     if (old_rows, new_rows) != (windows.old_rows, windows.new_rows):
         raise RuntimeError(f'rows of the windows (old {old_rows:,}, new {new_rows:,}) differ from the counts '
                            f'(old {windows.old_rows:,}, new {windows.new_rows:,})')
-    for month in months.values():
+    for name, month in months.items():
         month['keys'] = {category: month['keys'][category] for category in CATEGORIES if category in month['keys']}
-        month['deviations'] = sorted_tree(month['deviations'])
+        month['days'] = sorted_tree(month['days'])
+        if config.group_by:
+            nested: dict[str, Any] = {}
+            for group, cell in groups[name].items():
+                for category, stats in cell.items():
+                    stats['days'] = day_ranges(group_days[name, group, category])
+                node = nested
+                for part in group[:-1]:
+                    node = node.setdefault(part, {})
+                node[group[-1]] = cell
+            month['groups'] = sorted_tree(nested)
     return list(months.values())
 
 
@@ -107,11 +134,12 @@ class Running:
     futures: list[Future[WindowResult]]
 
 
-def finish(config_name: str, config: Config, running: Running, failing_before: int, max_failing: int) -> int:
+def finish(config_name: str, config: Config, thresholds: Thresholds, running: Running, failing_before: int,
+           max_failing: int) -> int:
     """Writes the months of a finished partition in date order, until the failing keys of the run exceed
     max_failing; returns the failing keys of the run after it."""
     try:
-        months = build_months(config, running.partition, running.started, running.windows,
+        months = build_months(config, thresholds, running.partition, running.started, running.windows,
                               [future.result() for future in running.futures])
     except RuntimeError as error:
         # a failed partition writes nothing and is retried on the next run
@@ -133,16 +161,19 @@ def main() -> None:
     parser.add_argument('partitions', nargs='*')
     parser.add_argument('--parallel', type=int, default=2)
     parser.add_argument('--max-failing-keys', type=int, default=100_000)
+    parser.add_argument('--float-max', type=float, default=1e-6)
+    parser.add_argument('--small-max', type=float, default=0.01)
     parser.add_argument('--force', action='store_true')
     parser.add_argument('--print-sql', nargs=2, metavar=('PARTITION', 'WINDOW'))
     args = parser.parse_args()
     config = load_config(args.config)
+    thresholds = Thresholds(args.float_max, args.small_max)
     all_partitions = {partition.name: partition for partition in partitions(config)}
 
     if args.print_sql:
         partition = all_partitions[args.print_sql[0]]
         key_range = cut_partition_into_windows(config, partition).key_ranges[int(args.print_sql[1])]
-        print(compare_sql(config, partition, key_range))
+        print(compare_sql(config, partition, key_range, thresholds))
         return
 
     if config.group_by and (args.force or load_json(coverage_path(args.config)) is None):
@@ -174,7 +205,7 @@ def main() -> None:
     def finish_ready() -> None:
         nonlocal failing
         while queue and all(future.done() for future in queue[0].futures) and failing <= args.max_failing_keys:
-            failing = finish(args.config, config, queue.popleft(), failing, args.max_failing_keys)
+            failing = finish(args.config, config, thresholds, queue.popleft(), failing, args.max_failing_keys)
 
     try:
         for partition in todo:
@@ -189,7 +220,8 @@ def main() -> None:
             except RuntimeError as error:
                 print(f'{partition.name}  FAILED to cut: {error}', file=sys.stderr, flush=True)
                 continue
-            futures = [pool.submit(run_window, config, partition, key_range) for key_range in windows.key_ranges]
+            futures = [pool.submit(run_window, config, partition, key_range, thresholds)
+                       for key_range in windows.key_ranges]
             queue.append(Running(partition, started, windows, futures))
             finish_ready()
         while queue and failing <= args.max_failing_keys:

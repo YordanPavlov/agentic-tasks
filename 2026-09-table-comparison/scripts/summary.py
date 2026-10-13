@@ -9,10 +9,9 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from typing import Any, Iterator
 
-from common import (CATEGORIES, Month, coverage_path, failing_keys, is_cell, load_config, load_json, month_path,
-                    months)
+from common import (CATEGORIES, Month, cell_failing_keys, cells, coverage_path, failing_keys, load_config,
+                    load_json, month_path, months, range_days)
 
 MEANING = {
     'missing_in_new': 'key only in old',
@@ -20,15 +19,6 @@ MEANING = {
     'differs': "the sums of the key's values differ by more than the tolerance",
     'equal': 'equal within the tolerance',
 }
-
-
-def cells(node: dict[str, Any], path: tuple[str, ...] = ()) -> Iterator[tuple[tuple[str, ...], dict[str, Any]]]:
-    """(group values and day, cell) of the nested deviations."""
-    if is_cell(node):
-        yield path, node
-        return
-    for key, child in node.items():
-        yield from cells(child, path + (key,))
 
 
 def main() -> None:
@@ -54,6 +44,8 @@ def main() -> None:
         result = load_json(month_path(args.config, month))
         if result is None:
             missing.append(month)
+        elif 'days' not in result:
+            raise SystemExit(f'{month_path(args.config, month)} is in an older format; re-run with --force')
         else:
             results.append(result)
     print(f'\nmonths: {len(results)} done, {len(missing)} missing'
@@ -70,24 +62,21 @@ def main() -> None:
 
         # the failing cells of the first failing month, per group (config.group_by), or per day without groups
         first = failing[0]
-        entries: dict[tuple[str, ...], tuple[Counter[str], list[str], float]] = {}
-        for path, cell in cells(first['deviations']):
-            key = path[:-1] if config.group_by else path
-            counts, days, max_diff_pct = entries.get(key, (Counter[str](), [], -1.0))
-            counts.update({category: cell[category] for category in CATEGORIES if category in cell})
-            entries[key] = (counts, days + [path[-1]], max(max_diff_pct, cell.get('max_diff_pct', -1.0)))
-        largest = sorted(entries.items(), key=lambda entry: -failing_keys(entry[1][0]))[:args.lines]
+        entries = list(cells(first.get('groups') or first['days']))
+        largest = sorted(entries, key=lambda entry: -cell_failing_keys(entry[1]))[:args.lines]
         print(f"\nfirst failing month {first['month']}: {len(entries):,} failing "
               f"{'groups' if config.group_by else 'days'}; the {len(largest)} largest:")
-        for key, (counts, days, max_diff_pct) in largest:
-            where = ' '.join(f'{column}={value}' for column, value in zip(config.group_by, key))
-            if config.group_by:
-                where += f'  {min(days)}..{max(days)} ({len(days)} days)' if len(days) > 1 else f'  {days[0]}'
-            else:
-                where = key[-1]
-            counts_text = ', '.join(f'{category}={counts[category]:,}' for category in CATEGORIES if counts[category])
-            max_text = f', max {max_diff_pct}%' if max_diff_pct >= 0 else ''
-            print(f'  {where}  {counts_text}{max_text}')
+        for path, cell in largest:
+            where = ' '.join(f'{column}={value}' for column, value in zip(config.group_by, path)) or path[0]
+            parts = []
+            for category, stats in cell.items():
+                details = {name: value for name, value in stats.items() if name not in ('keys', 'days') and value}
+                parts.append(f"{category}={stats['keys']:,}"
+                             + (f" ({', '.join(f'{name} {value:,}' for name, value in details.items())})"
+                                if details else '')
+                             + (f" on {range_days(stats['days'])} days: {', '.join(stats['days'][:3])}"
+                                f"{' …' if len(stats['days']) > 3 else ''}" if 'days' in stats else ''))
+            print(f"  {where}  {'; '.join(parts)}")
 
     keys = Counter[str]()
     rows = Counter[str]()

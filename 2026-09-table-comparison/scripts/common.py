@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from string import Template
-from typing import Any, TypedDict
+from typing import Any, Iterable, Iterator, NotRequired, TypedDict
 
 from configs import CONFIGS, Config
 
@@ -32,6 +32,8 @@ LOG_COMMENT = json.dumps({'job': 'table-compare', 'owner': 'yordan.p@santiment.n
                           'repo': 'clickhouse-tables', 'dag': 'manual-tests'})
 
 CATEGORIES = ('missing_in_new', 'missing_in_old', 'differs', 'equal')
+# the classes of 'differs' by size; compare.py's --float-max and --small-max set the bounds
+DIFF_CLASSES = ('float', 'small', 'large')
 # Network errors (209 timeout, 210 connection refused, 32 unexpected EOF) are retried; anything else is final.
 RETRYABLE_ERROR_CODES = {'32', '209', '210'}
 
@@ -141,10 +143,18 @@ def table_values(config: Config, start: str, end: str, common_groups: bool = Tru
                 new_where=side_where(config, 'new', common_groups))
 
 
-def compare_sql(config: Config, partition: Partition, key_range: str) -> str:
+@dataclass(frozen=True)
+class Thresholds:
+    """Upper bounds of the 'float' and 'small' classes."""
+    float_max: float
+    small_max: float
+
+
+def compare_sql(config: Config, partition: Partition, key_range: str, thresholds: Thresholds) -> str:
     return from_template('compare.sql', config, dict(
         **table_values(config, partition.start, partition.end), key_range=key_range,
         keys=', '.join(config.keys), value=config.value, tolerance=repr(FLOAT_TOLERANCE),
+        float_max=repr(thresholds.float_max), small_max=repr(thresholds.small_max),
         group_cells=''.join(f'toString({column}), ' for column in config.group_by)))
 
 
@@ -232,37 +242,72 @@ def coverage(config: Config) -> dict[str, list[dict[str, Any]]]:
 
 # ---------- result files ----------
 
-def describe(config: Config) -> dict[str, object]:
+def describe(config: Config, thresholds: Thresholds | None = None) -> dict[str, object]:
     """What a reader of the results needs to know about the comparison, without configs.py."""
     return dict(old=config.old, new=config.new, keys=list(config.keys), value=config.value,
                 group_by=list(config.group_by), dt=config.dt, start=config.start, cutoff=config.cutoff,
-                tolerance=FLOAT_TOLERANCE, common_groups_only=config.common_groups_only,
+                tolerance=FLOAT_TOLERANCE,
+                **(dict(float_max=thresholds.float_max, small_max=thresholds.small_max) if thresholds else {}),
+                common_groups_only=config.common_groups_only,
                 where=config.where, where_old=config.where_old, where_new=config.where_new)
 
 
 class Month(TypedDict):
-    """One results/<config>/YYYY/YYYY-MM.json. deviations: group value → … → day → cell, failing cells only;
-    a cell holds the keys per failing category, and max_diff_pct for 'differs'."""
+    """One results/<config>/YYYY/YYYY-MM.json."""
     month: str
     config: dict[str, object]
     partition: dict[str, object]  # the partition the month was compared in: name, windows, started, finished (UTC)
     rows: dict[str, int]       # old, new: as FINAL shows them
     keys: dict[str, int]       # per category
-    deviations: dict[str, Any]
+    days: dict[str, Any]       # day -> cell, failing keys only
+    groups: NotRequired[dict[str, Any]]  # group_by values -> cell, with group_by only
 
 
 def failing_keys(keys: dict[str, int]) -> int:
-    """The keys of all categories but equal, from a month's keys or a cell."""
+    """The keys of all categories but equal, from a month's keys."""
     return sum(keys.get(category, 0) for category in CATEGORIES if category != 'equal')
 
 
+def cell_failing_keys(cell: dict[str, Any]) -> int:
+    return sum(stats['keys'] for stats in cell.values())
+
+
 def is_cell(node: object) -> bool:
-    """Whether a node of the deviations is a cell (category counts), not a level of groups or days."""
-    return isinstance(node, dict) and bool(node) and not any(isinstance(child, dict) for child in node.values())
+    """Whether a node under days or groups is a cell: category -> stats."""
+    return (isinstance(node, dict) and bool(node)
+            and all(key in CATEGORIES and isinstance(child, dict) for key, child in node.items()))
+
+
+def cells(node: dict[str, Any], path: tuple[str, ...] = ()) -> Iterator[tuple[tuple[str, ...], dict[str, Any]]]:
+    """(path, cell) of days or groups."""
+    if is_cell(node):
+        yield path, node
+        return
+    for key, child in node.items():
+        yield from cells(child, path + (key,))
+
+
+def day_ranges(days: Iterable[str]) -> list[str]:
+    """ISO days as ranges of consecutive days: 'YYYY-MM-DD..YYYY-MM-DD', or the day alone."""
+    ranges: list[list[datetime.date]] = []
+    for day in sorted(datetime.date.fromisoformat(day) for day in set(days)):
+        if ranges and day - ranges[-1][1] == datetime.timedelta(days=1):
+            ranges[-1][1] = day
+        else:
+            ranges.append([day, day])
+    return [str(first) if first == last else f'{first}..{last}' for first, last in ranges]
+
+
+def range_days(ranges: list[str]) -> int:
+    """The number of days in day_ranges' output."""
+    def length(text: str) -> int:
+        first, _, last = text.partition('..')
+        return (datetime.date.fromisoformat(last or first) - datetime.date.fromisoformat(first)).days + 1
+    return sum(length(text) for text in ranges)
 
 
 def to_json(value: object) -> str:
-    """Pretty-printed JSON, except that the cells under 'deviations' stay on one line each."""
+    """Pretty-printed JSON, except that the cells under days and groups stay on one line each."""
     cells: list[object] = []
 
     def mark(node: object) -> object:
@@ -272,8 +317,8 @@ def to_json(value: object) -> str:
         if isinstance(node, dict):
             return {key: mark(child) for key, child in node.items()}
         return node
-    if isinstance(value, dict) and 'deviations' in value:
-        value = {**value, 'deviations': mark(value['deviations'])}
+    if isinstance(value, dict):
+        value = {key: mark(child) if key in ('days', 'groups') else child for key, child in value.items()}
     text = json.dumps(value, indent=2)
     return re.sub(r'"<cell (\d+)>"', lambda match: json.dumps(cells[int(match.group(1))]), text)
 
