@@ -1,11 +1,11 @@
 # Comparing an old and a new version of a table (runbook)
 
 **Started:** 2026-09-30
-**Status:** Per-month output (`scripts/`, described in `scripts/README.md`), implemented 2026-10-09; stacks are
-compared by the consumers' key since then. `xrp_stacks`: equal through 2025-06-16; everything after traces back to
-old losing blocks in June 2025 (see "Runs"). A full re-run with the consumers' key is running (2026-10-09).
-`daily_metrics` (Optimism): the experimental run's P/L family is broken by job ordering; fix on branch
-`seamDependsOnPrice` (pushed, no PR yet); re-run pending.
+**Status:** `compare.py` (`scripts/README.md`) writes per month the failing keys per day and per group, with zero
+counts and difference size and direction (2026-10-13). Next: the analysis step, an agent following a recipe
+(design below, "Analysis"); not written yet. `xrp_stacks`: equal through 2025-05; everything after traces back to
+old losing blocks in June 2025 (see "Runs"). `daily_metrics` (Optimism): experimental was rewritten on 2026-10-13,
+so the 2026-10-09 findings are out of date; to be analysed again.
 **Origin:** [`2026-09-rerun-comparison-framework`](../2026-09-rerun-comparison-framework/rerun-comparison-framework.md)
 has the development history and the first XRP balances results.
 
@@ -29,8 +29,8 @@ Ground rules:
 ## The tool
 
 `scripts/README.md` describes the method, the output and the usage; `scripts/configs.py` documents the config
-fields. In short: `compare.py` compares month by month in date order and writes `scripts/results/<config>/`;
-`summary.py` reads it.
+fields. In short: `compare.py` compares month by month in date order and writes `scripts/results/<config>/`,
+one JSON file per month; its log has one line per month.
 
 Reading the categories:
 
@@ -43,7 +43,7 @@ Reading the categories:
 ### Design decisions (2026-10-09)
 
 The previous version kept up to 10,000 key hashes per category for drill-down; the full stacks run left a 36 GB
-cache that `summary.py` could not load, and its results were spread over key ranges, not dates.
+cache that could not be loaded, and its results were spread over key ranges, not dates.
 - **One value column.** A key that doesn't match and a value that differs need the same investigation, so every
   other column that matters is key. Balances `old*` columns are checked as invariants instead (below).
 - **The consumers' key, value summed.** Stacks are keyed `(contractAddress, address, sign, assetRefId, dt, odt)`,
@@ -54,11 +54,43 @@ cache that `summary.py` could not load, and its results were spread over key ran
 - **Actual keys, no hashes.** Costs ~50% more memory per window. Example keys were dropped from the output
   (2026-10-09): they complicated the query, and a cell's keys can be listed with the window's query.
 - **No fingerprints.** A month file records the config and when it ran; after a change, re-run with `--force`.
-- **Output per month, failing cells only**, self-describing, as input for a follow-up analysis tool (metric names,
-  cross-metric dependencies).
+- **Output per month, failing keys only**, self-describing, the input of the analysis. Two views (2026-10-13):
+  `days`, and with `group_by` `groups` (one line per failing group, its days as ranges): one line per group and
+  day made a `daily_metrics` month 119,714 lines, now ≤ ~4,700. Per cell: missing keys with value 0 (`zero`),
+  `differs` by size (`float` ≤ 1e-6, `small` ≤ 1%, `large`; `--float-max`, `--small-max`) and direction
+  (`new_gt_old`). Zeros still count as failing and toward `--max-failing-keys`.
 - **Metrics:** `daily_metrics_v2_experimental` holds a few assets (Optimism ERC-20 tokens) and lacks the metrics
   that were not part of the run. `where` limits old to its assets; `common_groups_only` leaves the missing
   metrics out of the comparison and lists them in `coverage.json`. A metric that is present must be complete.
+
+### Analysis (design, 2026-10-13)
+
+The step after `compare.py`: find the causes and write the summary. An agent does it, following a recipe, so that
+every comparison is analysed to the same standard and the write-ups read alike.
+- **A README, invoked explicitly** (not a skill): `scripts/analysis/README.md` (the recipe), `catalog.md` (causes),
+  `template.md`, `playbooks/{stacks,balances,transfers,metrics}.md`, committed with the scripts.
+- **One agent with one context**, no per-cluster subagents: causes interact (2026-05-31 was the June 2025
+  incident; one ordering bug behind the P/L family and the launch months). Subagents only for mechanical probes.
+- **Input: the month files** of `compare.py`, nothing derived; the agent queries the tables and reads the source
+  code as it needs. A pre-digest (change points, clusters) was tried and dropped: hard to read, and it adds an
+  interpretation layer. `summary.py` was removed for the same reason.
+- **Walk the time line:** start with the earliest failing year (much of what follows is accumulated); then go
+  forward month by month, and account for every new onset: groups or days that start failing are a new event or
+  explained by an earlier one. Late, independent causes exist (`xrp_stacks` 2025-06, the 2025-07-23 contract
+  switch).
+- **Stop at high confidence, no budget.** Confidence: high = a catalog signature, confirmed on samples across the
+  event's extent, mechanism shown in the data (rows of both sides, and the source or job when that is the cause);
+  medium = signature and samples, no mechanism; low = signature only. A cause that cannot be found is
+  `unexplained` once the testable hypotheses are ruled out; it goes to the log for a later iteration.
+- **Cause catalog:** one entry per cause (applies to, signature, how to confirm, typical impact, seen in). The agent
+  never edits it; it proposes candidates, which are promoted by hand. Entries come from "Runs" below (lost blocks,
+  zero padding, key renumbering, contract switch, source gap, job ordering, …).
+- **Output, in `results/<config>/`, not committed:** `analysis.md`, 2–3 pages: verdict and impact first, then the
+  events in order of first appearance, each with a duration in fixed wording (`1 day`, `N days (A..B), not
+  recurring`, `intermittent, N days between A and B`, `from A until the cutoff`, plus `growing` / `fading` when it
+  matters) and links to related events ("Consequence of 1"); `investigation-log.md`: what was tried, what stayed
+  unexplained, catalog candidates. Comparisons across runs are not part of the format; the agent can be given two
+  runs' results.
 
 ## Procedure
 
@@ -82,10 +114,10 @@ cache that `summary.py` could not load, and its results were spread over key ran
      checked.
 4. **Run everything** in the background: `nohup python3 compare.py <config> > compare.log 2>&1 &`. It prints one line
    per month, and stops after the month in which the failing keys pass `--max-failing-keys` (default 100k).
-5. **`python3 summary.py <config>`.** For every failing category, list a few keys of a failing cell (README,
-   "The comparison query") and query both tables for them. Find the cause from the rows.
+5. **Analyse** the results ("Analysis" above). Until the recipe exists: for every failing category, list a few keys
+   of a failing cell (README, "The comparison query") and query both tables for them; find the cause from the rows.
 6. **Optionally, run table invariants** (below) on both sides.
-7. **Write the executive summary**, and add the run to "Runs" below.
+7. **Write the summary**, and add the run to "Runs" below.
 
 ### Key changes
 
@@ -113,8 +145,8 @@ They catch errors that old and new share, which a comparison cannot see:
 - Stacks 2024-01 (2026-10-09): 498M rows with `FINAL`, both sides together; 9 windows, 264 s query time, 2:44
   wall at `--parallel 2`. A window query takes 22–57 s per shard and ~10.5 GiB; the counting query 31 s, 1.2 GiB.
   `TCMP_WINDOW_ROWS=14000000` brings a window back to ~7 GiB. Small months take 1–2 s.
-- `daily_metrics` (one period, 2 windows): ~180–240 s of query time, plus up to 4 min of Python parsing the
-  rows of every failing point.
+- `daily_metrics` (one period, 2 windows): ~70–190 s for the whole range (2026-10-13).
+- `xrp_stacks` full, 2013-01 .. 2026-09: 43 min wall (2026-10-13, light load).
 - Cluster load can change the speed by an order of magnitude. Check the load with
   `SELECT count(), countIf(elapsed > 60) FROM system.processes` (that sees one broker only), and prefer evenings
   and weekends.
@@ -140,14 +172,15 @@ They catch errors that old and new share, which a comparison cannot see:
 - `pkill -f <pattern>` can match its own shell; kill by PID.
 - Keep outputs local. Don't publish artifacts or docs unless asked.
 
-## Executive summary template
+## Summary outline
 
+Until `scripts/analysis/template.md` exists:
 ```
 # <old> vs <new>: <PASS | PASS with caveats | DIFFERS>
-Scope: <start> .. <cutoff>, months run / skipped; rows and keys per side; run date; wall time.
-Verdict: one or two sentences (e.g. "new ⊇ old, equal within 1e-9; new recovers N keys on <days>").
-| category | keys | where | cause |    (one row per category that is not OK)
-Discrepancies: per class: size, where (dates), cause if found (with an example row), benign or not.
+Verdict and impact: ≤3 sentences (e.g. "new is right; old lost 5 block ranges in June 2025").
+Scope: <start> .. <cutoff>, months run / skipped; rows and keys per side; run date.
+Events, by first appearance: date, what, duration, impact (new better / old better / benign / regression),
+  mechanism with an example row per side, confidence.
 Not checked: months skipped, invariants not run, open questions (e.g. backfill end date).
 ```
 
@@ -162,7 +195,8 @@ Not checked: months skipped, invariants not run, open questions (e.g. backfill e
 | 2026-10-09 | `xrp_stacks` 2013-02..06, 2024-01 | per-month output | equal; trial, below |
 | 2026-10-09 | `daily_metrics` | per-month output, then direct queries | DIFFERS: mixed, new not strictly better; below |
 | 2026-10-09 | `xrp_stacks` 2013-02 .. 2026-09-03 | per-month output, `nonce_rank` key | equal until 2025-06-17, then old lost blocks; below |
-| 2026-10-09 | `xrp_stacks`, full | consumers' key | running |
+| 2026-10-13 | `xrp_stacks` 2013-01 .. 2026-09-03 | days/groups output, consumers' key | equal through 2025-05, then every month fails; below |
+| 2026-10-13 | `daily_metrics`, after experimental was rewritten | days/groups output | first failing year 2020; below |
 
 **Validation, 2026-10-02:**
 - Key and row counts match `uniqExact` / `count()` on the Distributed tables exactly (stacks 2013-03, balances
@@ -251,15 +285,27 @@ range was then aggregated with direct queries (scratchpad, not kept): equal 7.10
   2.43M missing keys per side. With the consumers' key: 4 and 10.
 - Verdict: new is right; old lost blocks and, for the small ranges, has a corrupted state since.
 
+**`xrp_stacks` full run, consumers' key, 2026-10-13:** 8.41B keys per side; `differs` 9.35M, `missing_in_new` 308k,
+`missing_in_old` 449k, all from 2025-06 (peak 2025-07: 4.0M `differs`, 212k missing per side; 40–170k `differs` a
+month from 2025-09). 2025-12 is lopsided: 7,294 `missing_in_old` vs 142 `missing_in_new`, 7,119 of them on
+2025-12-22 (new +7,268 rows).
+
+**`daily_metrics`, 2026-10-13:** `daily_metrics_v2_experimental` last written 2026-10-13 05:06 (13.2M rows; probably
+the re-run with `seamDependsOnPrice`, not confirmed). Equal 2009–2019; from 2020-01 old has zero-valued keys new
+lacks (3 groups, then 572 from 2021-02). 2025, seen while trying a pre-digest: change points on 2025-02-27/28
+(~800 groups stop: the 2024-02-26..28 gap leaving the 1y lookback), 03-25 and 04-15 (o-walletconnect-token switches
+`missing_in_old` → `differs`), 07-23 (contract switch), 12-22/23 (241 groups start, 169 stop; unexplained);
+source days 2025-01-12 and 02-01 as one-day pauses in ~250–290 groups. 2,023 groups differ on every day of 2025.
+
 ## Open
 
-- `daily_metrics`: PR for `seamDependsOnPrice`; re-run the optERC20 experimental run with it, then compare again
-  (P/L family, launch months). Fix o-aave's `asset_ref_id`. Explain the pre-2024 balance/stack `differs` and
-  `total_supply`.
-- `daily_metrics`: `compare.py` stops at the zero padding; consider a zero-tolerant category or `--max-failing-keys`.
+- Write the analysis recipe (`scripts/analysis/`), then try it on `xrp_stacks` and `daily_metrics`.
+- `daily_metrics`: confirm what rewrote experimental on 2026-10-13; PR for `seamDependsOnPrice`; fix o-aave's
+  `asset_ref_id`; explain the pre-2024 balance/stack `differs`, `total_supply`, and 2025-12-22. Its zero padding
+  stops `compare.py`: run with a high `--max-failing-keys`.
 - An HTML page for the results: daily stacked bars per category, a year → month → day table.
 - Full `xrp_balances` run.
-- Stacks: results of the re-run with the consumers' key.
-- Stacks: 2025-12, new has 7,268 rows more (`missing_in_old` 7,477): more blocks lost by old?
+- Stacks: 2025-12-22, new has ~7.1k keys old lacks: more blocks lost by old? (Same day as the `daily_metrics`
+  change point, on another chain.)
 - Stacks: the few addresses outside the lost blocks that differ (2 in 2025-06, 6–10 per month after).
 - Script the invariants, starting with the balance chain.
