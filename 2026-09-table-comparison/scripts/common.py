@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from string import Template
-from typing import Any, Iterable, Iterator, NotRequired, TypedDict
+from typing import Any, Iterable, NotRequired, TypedDict
 
 from configs import CONFIGS, Config
 
@@ -268,23 +268,10 @@ def failing_keys(keys: dict[str, int]) -> int:
     return sum(keys.get(category, 0) for category in CATEGORIES if category != 'equal')
 
 
-def cell_failing_keys(cell: dict[str, Any]) -> int:
-    return sum(stats['keys'] for stats in cell.values())
-
-
 def is_cell(node: object) -> bool:
     """Whether a node under days or groups is a cell: category -> stats."""
     return (isinstance(node, dict) and bool(node)
             and all(key in CATEGORIES and isinstance(child, dict) for key, child in node.items()))
-
-
-def cells(node: dict[str, Any], path: tuple[str, ...] = ()) -> Iterator[tuple[tuple[str, ...], dict[str, Any]]]:
-    """(path, cell) of days or groups."""
-    if is_cell(node):
-        yield path, node
-        return
-    for key, child in node.items():
-        yield from cells(child, path + (key,))
 
 
 def day_ranges(days: Iterable[str]) -> list[str]:
@@ -296,14 +283,6 @@ def day_ranges(days: Iterable[str]) -> list[str]:
         else:
             ranges.append([day, day])
     return [str(first) if first == last else f'{first}..{last}' for first, last in ranges]
-
-
-def range_days(ranges: list[str]) -> int:
-    """The number of days in day_ranges' output."""
-    def length(text: str) -> int:
-        first, _, last = text.partition('..')
-        return (datetime.date.fromisoformat(last or first) - datetime.date.fromisoformat(first)).days + 1
-    return sum(length(text) for text in ranges)
 
 
 def to_json(value: object) -> str:

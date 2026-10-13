@@ -77,8 +77,6 @@ Run from this directory. `<config>` is a key of `CONFIGS` in `configs.py`.
    month's file; its time, times the number of months, is an upper bound for the full run.
 2. `python3 compare.py <config>`: all partitions, one line per month. For a long run:
    `nohup python3 compare.py <config> > compare.log 2>&1 &`.
-3. `python3 summary.py <config>`: coverage, failing months, the failing groups (or days) of the first failing
-   month, keys per category and the verdict.
 
 `compare.py <config> --print-sql <partition> <window>` prints the filled-in query of one window (it cuts the
 partition first, which takes seconds). To list the failing keys of a cell, replace its outer `SELECT … GROUP BY
