@@ -23,7 +23,8 @@ Invoke as: *"Analyse `results/<config>/` following `scripts/analysis/README.md`.
 4. **One agent, one context.** Causes interact; keep the whole picture yourself. Subagents only for mechanical
    probes (run these N queries, fetch these rows), with their result checked by you.
 5. **Don't touch the inputs or the catalog.** Never edit the month files, `configs.py`, or `catalog.md`; propose
-   catalog candidates in the log. Write only `results/<config>/analysis.md` and `investigation-log.md`.
+   catalog candidates in the log. Write only `results/<config>/analysis.md` and `investigation-log.md` (and, when continuing, the
+   renamed earlier `analysis.md`).
 6. **Keep it local.** No artifacts, docs, PRs, or messages unless the user asks.
 7. **Ask when blocked on a fact only a person has** (did the backfill finish, is the end date intended, was a
    contract switch deliberate). If you can't ask, write the question into the summary and continue on the stated
@@ -59,6 +60,20 @@ Earlier investigations are in `~/src/agentic-tasks/*/`; grep them for the table 
 **Shell:** zsh. A variable holding a command is not split into words (use `chq`); quote globs (`--include='*.scala'`,
 `ls -d ~/x/*/y`), since an unmatched glob is an error. Foreground `sleep` is blocked: run long queries with
 `run_in_background` and wait for the notification.
+
+## Continuing an analysis
+
+If `results/<config>/analysis.md` exists, this is a continuation: more months were compared, or the earlier analysis
+left questions. Read it and `investigation-log.md` first, and compare their scope with the month files present.
+- **Earlier findings are the starting point, not to be proven again.** For each high-confidence event, state what it
+  predicts for the new months (e.g. "the state error persists on the 779 B/D addresses, fading") and check that with
+  a cheap probe: are the failing keys inside the known footprint, does the trend hold.
+- **Spend the effort on what they don't predict:** new onsets, failures outside a known footprint, and the earlier
+  open questions and `unexplained` items.
+- **Earlier conclusions can be wrong.** If the new months contradict an event, re-open it and say so in the log.
+- **Outputs:** rename the previous `analysis.md` to `analysis-<YYYY-MM-DD of its writing>.md`, then write a new one
+  covering the whole scope, standalone (not a diff). Add a dated section to `investigation-log.md`; don't rewrite the
+  earlier ones.
 
 ## Procedure
 
