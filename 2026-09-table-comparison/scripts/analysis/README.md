@@ -29,6 +29,37 @@ Invoke as: *"Analyse `results/<config>/` following `scripts/analysis/README.md`.
    contract switch deliberate). If you can't ask, write the question into the summary and continue on the stated
    assumption.
 
+## Environment
+
+**Queries:** run them with `analysis/chq` (from `scripts/`), not a hand-built `clickhouse-client` line. SQL comes
+from stdin or a file, so no shell quoting; values go in as ClickHouse parameters, not by shell substitution:
+```sh
+analysis/chq -p d=2025-06-17 <<'EOF'
+SELECT count() FROM default.xrp_stacks FINAL WHERE dt >= {d:Date} AND dt < {d:Date} + 1
+EOF
+```
+`-f PrettyCompact` for reading, the default `TSVWithNames` for files. Keep reusable SQL in the scratchpad and
+loop over days with `-p`.
+
+**Tables:** the config names the local `*_shard_vN` tables. For probes, the Distributed tables over them read all
+shards at once: `SELECT database, name, engine_full FROM system.tables WHERE engine = 'Distributed' AND engine_full
+LIKE '%<local table>%'` (e.g. `xrp_stacks_shard_v9` is behind `test.xrp_stacks_test`).
+
+**Repos:** `~/santiment/src/clickhouse-tables` (metric jobs, `table_qa`), `~/santiment/src/etherbi-flink` (the Flink
+jobs that write transfers, balances and stacks), `~/santiment/src/san-chain-exporter` (the exporters feeding Kafka).
+Earlier investigations are in `~/src/agentic-tasks/*/`; grep them for the table names.
+
+**The server runs the old analyzer** (`enable_analyzer=0`):
+- `ORDER BY` after `UNION ALL` belongs to the last branch only: wrap the union in `SELECT * FROM (…) ORDER BY …`.
+- An alias that shadows a column changes the expressions using it; `sum(x) AS x` fails with `ILLEGAL_AGGREGATION`.
+  Give aliases names that no column has.
+- `SELECT *` skips MATERIALIZED columns (e.g. `assetRefId` in balances): list the columns.
+- 64-bit integers come quoted in JSON formats; `chq` turns that off.
+
+**Shell:** zsh. A variable holding a command is not split into words (use `chq`); quote globs (`--include='*.scala'`,
+`ls -d ~/x/*/y`), since an unmatched glob is an error. Foreground `sleep` is blocked: run long queries with
+`run_in_background` and wait for the notification.
+
 ## Procedure
 
 ### 0. Orient (≤ 15 min)

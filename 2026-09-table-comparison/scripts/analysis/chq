@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Runs one read-only query against the cluster compare.py uses (TCMP_HOST/PORT/USER).
+# Usage: chq [-f FORMAT] [-p name=value]... [FILE]    SQL from FILE, or from stdin.
+# Parameters are ClickHouse query parameters: write {name:Type} in the SQL (e.g. {d:Date}), not shell substitution.
+set -euo pipefail
+
+format=TSVWithNames
+params=()
+while getopts 'f:p:' opt; do
+  case $opt in
+    f) format=$OPTARG ;;
+    p) params+=("--param_${OPTARG%%=*}=${OPTARG#*=}") ;;
+    *) sed -n '2,4p' "$0" >&2; exit 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
+sql=$(cat "${1:--}")
+
+exec clickhouse-client -h "${TCMP_HOST:-clickhouse.production.san}" --port "${TCMP_PORT:-30900}" \
+  -u "${TCMP_USER:-readonly}" --readonly=2 \
+  --log_comment='{"job":"table-compare-analysis","owner":"yordan.p@santiment.net","team":"bigdata"}' \
+  --max_execution_time=1800 --output_format_json_quote_64bit_integers=0 \
+  --format="$format" "${params[@]}" --query "$sql"

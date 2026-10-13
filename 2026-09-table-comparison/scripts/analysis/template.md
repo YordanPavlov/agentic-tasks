@@ -3,7 +3,7 @@
 ## `analysis.md`
 
 ```markdown
-# <old> vs <new>: <PASS | PASS with caveats | DIFFERS>
+# <old> vs <new>: <PASS | PASS with caveats | DIFFERS>[, through <last month compared>]
 
 **Verdict and impact** (≤ 3 sentences): which side is right, what a consumer would see if new replaced old.
 E.g. "New is right: old lost 5 block ranges in June 2025 and carries a wrong state for ~400 addresses since.
@@ -35,6 +35,8 @@ Rules for the wording:
 - **Verdict:** `PASS` = no failing keys, or only float noise. `PASS with caveats` = every event is explained
   (high or medium) and is benign or new better. `DIFFERS` = any event where new is worse or both are wrong, or an
   unexplained event of material size.
+- **Partial scope:** when months up to the cutoff were not written (early stop, skipped), the verdict covers only
+  what was compared: add `, through <YYYY-MM>` to the title and say in the verdict that the rest is not checked.
 - **Impact,** one of: `new better`, `old better`, `both wrong`, `benign` (no consumer-visible change: zero padding,
   float noise, a split that the key sums away), `regression` (new wrong where old was right; `old better` from the
   consumer's view, named so because it blocks the replacement).
