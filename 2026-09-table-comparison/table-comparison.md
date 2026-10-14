@@ -1,7 +1,7 @@
 # Comparing an old and a new version of a table (runbook)
 
 **Started:** 2026-09-30
-**Status:** `compare.py` (`scripts/README.md`) writes per month the failing keys per day and per group, with zero
+**Status:** `compare.py` (`scripts/compare.md`) writes per month the failing keys per day and per group, with zero
 counts and difference size and direction (2026-10-13). Next: the analysis step, an agent following a recipe
 (design below, "Analysis"); not written yet. `xrp_stacks`: equal through 2025-05; everything after traces back to
 old losing blocks in June 2025 (see "Runs"). `daily_metrics` (Optimism): experimental was rewritten on 2026-10-13,
@@ -28,16 +28,16 @@ Ground rules:
 
 ## The tool
 
-`scripts/README.md` describes the method, the output and the usage; `scripts/configs.py` documents the config
-fields. In short: `compare.py` compares month by month in date order and writes `scripts/results/<config>/`,
-one JSON file per month; its log has one line per month.
+`scripts/README.md` is the entry point. `scripts/compare.md` describes the method, the output and the usage;
+`scripts/configs.py` documents the config fields. In short: `compare.py` compares month by month in date order and
+writes `scripts/results/<config>/`, one JSON file per month; its log has one line per month.
 
 Reading the categories:
 
 | category | usually |
 |---|---|
 | `equal` | OK |
-| `differs` | list the keys of the cell with the window's query (see the README), then look at the rows |
+| `differs` | list the keys of the cell with the window's query (see `scripts/compare.md`), then look at the rows |
 | `missing_in_new` / `missing_in_old` | lost in new / added in new (e.g. recovered data), or a key column that differs: then they come in equal numbers on the same days |
 
 ### Design decisions (2026-10-09)
@@ -67,8 +67,9 @@ cache that could not be loaded, and its results were spread over key ranges, not
 
 The step after `compare.py`: find the causes and write the summary. An agent does it, following a recipe, so that
 every comparison is analysed to the same standard and the write-ups read alike.
-- **A README, invoked explicitly** (not a skill): `scripts/analysis/README.md` (the recipe), `catalog.md` (causes),
-  `template.md`, `playbooks/{stacks,balances,transfers,metrics}.md`, committed with the scripts.
+- **A recipe, invoked explicitly** (not a skill, not `AGENTS.md`): `scripts/analysis/RECIPE.md`, `catalog.md`
+  (causes), `template.md`, `playbooks/{stacks,balances,transfers,metrics}.md`, committed with the scripts;
+  `scripts/analysis/README.md` describes them for people.
 - **One agent with one context**, no per-cluster subagents: causes interact (2026-05-31 was the June 2025
   incident; one ordering bug behind the P/L family and the launch months). Subagents only for mechanical probes.
 - **Input: the month files** of `compare.py`, nothing derived; the agent queries the tables and reads the source
@@ -115,7 +116,8 @@ every comparison is analysed to the same standard and the write-ups read alike.
 4. **Run everything** in the background: `nohup python3 compare.py <config> > compare.log 2>&1 &`. It prints one line
    per month, and stops after the month in which the failing keys pass `--max-failing-keys` (default 100k).
 5. **Analyse** the results ("Analysis" above). Until the recipe exists: for every failing category, list a few keys
-   of a failing cell (README, "The comparison query") and query both tables for them; find the cause from the rows.
+   of a failing cell (`scripts/compare.md`, "The comparison query") and query both tables for them; find the cause
+   from the rows.
 6. **Optionally, run table invariants** (below) on both sides.
 7. **Write the summary**, and add the run to "Runs" below.
 

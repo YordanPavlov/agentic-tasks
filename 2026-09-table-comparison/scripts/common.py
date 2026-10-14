@@ -1,5 +1,5 @@
 """Shared pieces of the old-vs-new table comparison: ClickHouse access, SQL generation from the templates in sql/,
-the partitions and windows, and the result files. README.md describes the method.
+the partitions and windows, and the result files. compare.md describes the method.
 """
 from __future__ import annotations
 

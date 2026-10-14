@@ -55,7 +55,7 @@ The onsets found (date, what changed), and which event each went to.
 
 ## Per event
 Hypotheses tried, in order; the queries that decided them (SQL in a code block, with the result); samples used;
-the refutation check (README, step 5) and its result.
+the refutation check (`RECIPE.md`, step 5) and its result.
 
 ## Unexplained
 What it looks like, the hypotheses ruled out and why, what would be needed next.

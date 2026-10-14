@@ -3,7 +3,7 @@
 Fields of Config:
   old, new     'db.table' of the LOCAL tables (the *_shard_vN tables for sharded ones), not the Distributed ones.
   cluster      Cluster whose shards hold the tables, for sharded tables. Each shard compares its own local
-               tables, which relies on old and new placing a key on the same shard (see README.md).
+               tables, which relies on old and new placing a key on the same shard (see compare.md).
                None for a table fully replicated to every broker: it is compared on the connected broker.
   dt           DateTime/Date column; [start, cutoff) is a range of it, and the output is per day of it.
   keys         Columns a key is made of. Usually the ReplacingMergeTree sorting key; a coarser key compares the
